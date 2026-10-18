@@ -1,31 +1,31 @@
 # Offlibrary roadmap
 
-Status key: 🛠 in progress for v0.1 · ✅ shipped · 🔜 next · 💡 idea, open for discussion.
+Status key: ✅ shipped in the current version · 🔜 next · 💡 idea, open for discussion.
 
-## v0.1: ship now
+## v0.1 (shipped in 0.1.0)
 
 | Feature | Notes |
 |---|---|
-| 🛠 `createOfflibrary(config)` with validated, typed collections config | `namespace`, `persist`, `resumeOnStart`, `progressInterval`, per-collection `strategy`, `backgroundFetchThreshold`, `maxItems`, `maxBytes`, `retries`, `retryDelay`, `ui`, `clickUrl`, `requestInit`, `autoSize` |
-| 🛠 Background Fetch transport | Deterministic IDs, `downloadTotal`, notification title/icons, live progress |
-| 🛠 Re-attach after reload | `getIds()` + `get(id)` reconciliation, progress resumes in the UI |
-| 🛠 Fallback transport | Streaming `fetch` with progress, cancel, retries with backoff |
-| 🛠 Resumable fallback | IndexedDB Blob segments + `Range`/`If-Range`, resumes on retry or on the next visit |
-| 🛠 Pause / resume (fallback) | Background Fetch has no pause in the spec, so `pause()` on a Background Fetch download reports `not-supported` |
-| 🛠 Multi-URL items | One item = several files (video + subtitles, a tile pack) with aggregate progress |
-| 🛠 Shared IndexedDB metadata + `BroadcastChannel` | All tabs and the SW agree on state |
-| 🛠 Typed events and `subscribe()` | `change`, `progress`, `complete`, `error`, `abort`, `evict` |
-| 🛠 Service-worker module | Handles `backgroundfetchsuccess/fail/abort/click`, `updateUI`, notifies pages |
-| 🛠 Range-request serving from cache | `206`, `416`, offline seeking of audio/video |
-| 🛠 Storage helpers | `estimate()`, `persist()`, `persisted()`, per-collection `usage()` |
-| 🛠 Quota pre-check, per-collection limits, LRU eviction, `pinned` items | |
-| 🛠 Integrity (`sha256/384/512`) and `version` replacement | |
-| 🛠 `sync(items, { prune })` | Reconcile with a feed and drop items that left it |
-| 🛠 Workbox-friendly SW helpers + IIFE build for `importScripts` | |
-| 🛠 Utilities | `formatBytes`, `isBackgroundFetchSupported`, `OfflibraryError` with stable `code`s |
-| 🛠 Tests | Vitest unit suite + Playwright e2e on real Background Fetch (full Chromium, headless=new) and the fallback |
-| 🛠 Demo podcast PWA | Public-domain LibriVox episodes, progress, cancel, delete, storage meter, offline playback, installable, GitHub Pages |
-| 🛠 npm readiness | `exports`, types, `files`, `sideEffects`, size budget in CI, RELEASING.md |
+| ✅ `createOfflibrary(config)` with validated, typed collections config | `namespace`, `persist`, `resumeOnStart`, `progressInterval`, per-collection `strategy`, `backgroundFetchThreshold`, `maxItems`, `maxBytes`, `retries`, `retryDelay`, `ui`, `clickUrl`, `requestInit`, `autoSize` |
+| ✅ Background Fetch transport | Deterministic IDs, `downloadTotal`, notification title/icons, live progress |
+| ✅ Re-attach after reload | `getIds()` + `get(id)` reconciliation, progress resumes in the UI |
+| ✅ Fallback transport | Streaming `fetch` with progress, cancel, retries with backoff |
+| ✅ Resumable fallback | IndexedDB Blob segments + `Range`/`If-Range`, resumes on retry or on the next visit |
+| ✅ Pause / resume (fallback) | Background Fetch has no pause in the spec, so `pause()` on a Background Fetch download reports `not-supported` |
+| ✅ Multi-URL items | One item = several files (video + subtitles, a tile pack) with aggregate progress |
+| ✅ Shared IndexedDB metadata + `BroadcastChannel` | All tabs and the SW agree on state |
+| ✅ Typed events and `subscribe()` | `change`, `progress`, `complete`, `error`, `abort`, `evict` |
+| ✅ Service-worker module | Handles `backgroundfetchsuccess/fail/abort/click`, `updateUI`, notifies pages |
+| ✅ Range-request serving from cache | `206`, `416`, offline seeking of audio/video |
+| ✅ Storage helpers | `estimate()`, `persist()`, `persisted()`, per-collection `usage()` |
+| ✅ Quota pre-check, per-collection limits, LRU eviction, `pinned` items | |
+| ✅ Integrity (`sha256/384/512`) and `version` replacement | |
+| ✅ `sync(items, { prune })` | Reconcile with a feed and drop items that left it |
+| ✅ Workbox-friendly SW helpers + IIFE build for `importScripts` | |
+| ✅ Utilities | `formatBytes`, `isBackgroundFetchSupported`, `OfflibraryError` with stable `code`s |
+| ✅ Tests | Vitest unit suite + Playwright e2e on real Background Fetch (full Chromium, headless=new) and the fallback |
+| ✅ Demo podcast PWA | Public-domain LibriVox episodes, progress, cancel, delete, storage meter, offline playback, installable, GitHub Pages |
+| ✅ npm readiness | `exports`, types, `files`, `sideEffects`, size budget in CI, RELEASING.md |
 
 ## v0.2: next
 
