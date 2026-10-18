@@ -1,0 +1,85 @@
+{
+  "title": "Offlibrary Radio",
+  "description": "Public-domain short stories read by LibriVox volunteers.",
+  "source": {
+    "name": "LibriVox's Short Story Collection 006",
+    "url": "https://archive.org/details/stories_006_librivox",
+    "librivox": "https://librivox.org/short-story-collection-006/",
+    "license": "Public domain (LibriVox recordings are dedicated to the public domain; texts are public domain)",
+    "licenseUrl": "https://librivox.org/pages/public-domain/"
+  },
+  "episodes": [
+    {
+      "id": "araby_joyce_lw",
+      "title": "Araby",
+      "author": "James Joyce",
+      "duration": "17:33",
+      "size": 8532480,
+      "url": "https://archive.org/download/stories_006_librivox/araby_joyce_lw_64kb.mp3"
+    },
+    {
+      "id": "my_financial_career_leacock_dr",
+      "title": "My Financial Career",
+      "author": "Stephen Leacock",
+      "duration": "05:23",
+      "size": 2696704,
+      "url": "https://archive.org/download/stories_006_librivox/my_financial_career_leacock_dr_64kb.mp3"
+    },
+    {
+      "id": "cask_of_amontillado_poe_jf",
+      "title": "The Cask of Amontillado",
+      "author": "Edgar Allan Poe",
+      "duration": "16:52",
+      "size": 8210944,
+      "url": "https://archive.org/download/stories_006_librivox/cask_of_amontillado_poe_jf_64kb.mp3"
+    },
+    {
+      "id": "after_twenty_years_henry_dr",
+      "title": "After Twenty Years",
+      "author": "O. Henry",
+      "duration": "07:11",
+      "size": 3557888,
+      "url": "https://archive.org/download/stories_006_librivox/after_twenty_years_henry_dr_64kb.mp3"
+    },
+    {
+      "id": "damned_thing_bierce_ge",
+      "title": "The Damned Thing",
+      "author": "Ambrose Bierce",
+      "duration": "21:18",
+      "size": 10334208,
+      "url": "https://archive.org/download/stories_006_librivox/damned_thing_bierce_ge_64kb.mp3"
+    },
+    {
+      "id": "sketchofmateship_lawson_wl",
+      "title": "A Sketch of Mateship",
+      "author": "Henry Lawson",
+      "duration": "04:40",
+      "size": 2352640,
+      "url": "https://archive.org/download/stories_006_librivox/sketchofmateship_lawson_wl_64kb.mp3"
+    },
+    {
+      "id": "last_lesson_daudet_dp",
+      "title": "The Last Lesson",
+      "author": "Alphonse Daudet",
+      "duration": "11:14",
+      "size": 5501952,
+      "url": "https://archive.org/download/stories_006_librivox/last_lesson_daudet_dp_64kb.mp3"
+    },
+    {
+      "id": "childs_dream_of_a_star_dickens_sc",
+      "title": "A Child's Dream of a Star",
+      "author": "Charles Dickens",
+      "duration": "06:45",
+      "size": 3348480,
+      "url": "https://archive.org/download/stories_006_librivox/childs_dream_of_a_star_dickens_sc_64kb.mp3"
+    },
+    {
+      "id": "ransom_red_chief_henry_ce",
+      "title": "The Ransom of Red Chief",
+      "author": "O. Henry",
+      "duration": "31:20",
+      "size": 15155200,
+      "url": "https://archive.org/download/stories_006_librivox/ransom_red_chief_henry_ce_64kb.mp3"
+    }
+  ]
+}

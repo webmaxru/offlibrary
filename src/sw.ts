@@ -326,13 +326,17 @@ export function offlibrarySW(options: OfflibrarySWOptions = {}): void {
     if (request.method !== 'GET' || request.mode === 'navigate') return;
     if (index) {
       if (!index.has(stripHash(request.url))) return;
-      event.respondWith(matchOfflibrary(request).then((r) => r ?? fetch(request)));
+    } else if (!COLD_START_DESTINATIONS.has(request.destination) && !request.headers.has('Range')) {
+      // The worker just started and the index is still loading. Only claim requests that are
+      // plausibly stored media; everything else stays with the app's own handlers (e.g. app shell).
       return;
     }
-    // Index still loading (worker just started): decide after it loads.
     event.respondWith(matchOfflibrary(request).then((r) => r ?? fetch(request)));
   });
 }
+
+/** Request destinations answered while the routing index is still loading after a worker start. */
+const COLD_START_DESTINATIONS = new Set(['audio', 'video', 'track', 'image']);
 
 /** @internal Exposed for tests. */
 export const _internals = {

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Offlibrary Radio · offline podcast demo</title>
+  <meta name="description" content="A podcast PWA built with Offlibrary: download public-domain episodes with Background Fetch (or a resumable fallback) and listen offline." />
+  <meta name="theme-color" content="#4338ca" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/favicon-64.png" type="image/png" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="icons/icon-192.png" alt="" width="44" height="44" />
+      <div>
+        <h1>Offlibrary Radio</h1>
+        <p class="tagline">Public-domain short stories. Download, go offline, keep listening.</p>
+      </div>
+    </div>
+    <div class="chips" id="chips" aria-live="polite"></div>
+  </header>
+
+  <main>
+    <section class="card storage" id="storage" aria-label="Storage"></section>
+
+    <section class="toolbar" aria-label="Settings">
+      <label>Transport
+        <select id="strategy">
+          <option value="auto">Auto (Background Fetch ≥ 5 MB)</option>
+          <option value="background-fetch">Always Background Fetch</option>
+          <option value="fetch">Fetch only (Safari / Firefox mode)</option>
+        </select>
+      </label>
+      <button class="ghost" id="download-all" type="button">Download all</button>
+    </section>
+
+    <ol class="episodes" id="episodes" aria-label="Episodes"><li class="loading">Loading episodes…</li></ol>
+
+    <details class="card log">
+      <summary>Library events</summary>
+      <ol id="log"></ol>
+    </details>
+  </main>
+
+  <footer class="player" id="player-bar" hidden>
+    <div class="now">
+      <strong id="now-title"></strong>
+      <span id="now-source" class="badge"></span>
+    </div>
+    <audio id="audio" controls preload="metadata"></audio>
+  </footer>
+
+  <footer class="credits">
+    <p>
+      Recordings: <a href="https://librivox.org/short-story-collection-006/" rel="noopener">LibriVox Short Story Collection 006</a>,
+      public domain, served by the <a href="https://archive.org/details/stories_006_librivox" rel="noopener">Internet Archive</a>.
+    </p>
+    <p>Built with <a href="https://github.com/webmaxru/offlibrary">Offlibrary</a> · MIT · <a href="https://github.com/webmaxru/offlibrary/tree/main/demo">demo source</a></p>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
