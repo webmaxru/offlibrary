@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>offlibrary e2e</title></head>
+<body>
+<audio id="player" preload="auto"></audio>
+<script type="module">
+  import { createOfflibrary, isBackgroundFetchSupported } from '/dist/offlibrary.min.js';
+
+  const params = new URLSearchParams(location.search);
+  const strategy = params.get('strategy') ?? 'auto';
+  window.events = [];
+  await navigator.serviceWorker.register('/e2e/fixtures/sw.js', { scope: '/e2e/fixtures/' });
+  const lib = createOfflibrary({
+    namespace: 'e2e',
+    persist: 'never',
+    progressInterval: 50,
+    collections: {
+      media: { strategy, backgroundFetchThreshold: 0, retryDelay: 50, ui: { icons: [] } },
+    },
+  });
+  for (const type of ['progress', 'complete', 'error', 'abort', 'delete', 'evict']) {
+    lib.on(type, ({ item, error }) => window.events.push({ type, id: item.id, status: item.status, strategy: item.strategy, downloaded: item.downloaded, total: item.total, code: error?.code }));
+  }
+  await lib.ready;
+  window.lib = lib;
+  window.media = lib.collection('media');
+  window.bgSupported = isBackgroundFetchSupported();
+  window.ready = true;
+</script>
+</body>
+</html>

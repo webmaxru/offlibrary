@@ -244,7 +244,7 @@ The core is plain DOM APIs. Framework adapters (`offlibrary/react` `useOfflibrar
 
 - Written in TypeScript and shipped as ESM with `.d.ts`.
 - `sideEffects: false`. The page entry and the SW entry are separate, so neither pulls in the other.
-- Budgets, enforced in CI by `npm run size`: main ≤ 6 KB gzip, SW ≤ 3.5 KB gzip.
+- Budgets, enforced in CI by `npm run size`: page entry ≤ 11 KB gzip and SW entry ≤ 4.5 KB gzip, measured as an app's bundler would bundle them. The first build measured about 10 KB and 4 KB. Most of the weight is descriptive error messages, which I kept on purpose.
 
 ### Testing strategy
 
