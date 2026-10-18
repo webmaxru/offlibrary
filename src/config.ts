@@ -73,7 +73,7 @@ export interface OfflibraryConfig {
   progressInterval?: number;
 }
 
-/** @internal */
+/** A collection's policy with every default filled in (see `collection.config`). */
 export type ResolvedCollectionConfig = Required<
   Pick<CollectionConfig, 'strategy' | 'backgroundFetchThreshold' | 'autoSize' | 'evict' | 'retries' | 'retryDelay' | 'resumable'>
 > &

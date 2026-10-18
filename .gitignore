@@ -6,3 +6,4 @@ coverage/
 .DS_Store
 test-results/
 e2e/.tmp/
+.tmp/

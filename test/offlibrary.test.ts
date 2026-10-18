@@ -72,6 +72,20 @@ describe('fetch transport (no Background Fetch)', () => {
     expect(episodes.snapshot()).toBe(s2);
   });
 
+  it('collection.subscribe() only reports its own items', async () => {
+    vi.stubGlobal('fetch', mockServer({ [A]: bytes(10), [B]: bytes(10) }).fetch);
+    const lib = make({ collections: { episodes: { retryDelay: 1 }, extras: {} } });
+    const seen: string[] = [];
+    const off = lib.collection('episodes').subscribe(({ item }) => seen.push(item.collection));
+    await lib.collection('extras').download({ id: 'x', url: B, size: 10 });
+    await lib.collection('extras').done('x');
+    await lib.collection('episodes').download({ id: 'a', url: A, size: 10 });
+    await lib.collection('episodes').done('a');
+    off();
+    expect(seen.length).toBeGreaterThan(0);
+    expect(new Set(seen)).toEqual(new Set(['episodes']));
+  });
+
   it('is idempotent for the same version and re-downloads a new version', async () => {
     const server = mockServer({ [A]: bytes(100) });
     vi.stubGlobal('fetch', server.fetch);
@@ -186,7 +200,7 @@ describe('fetch transport (no Background Fetch)', () => {
     await until(() => (episodes.peek('a')?.downloaded ?? 0) > 8000);
     // Simulate a crash: stop the transport but leave the record as "downloading".
     first.destroy();
-    await tick(20);
+    await until(async () => (await store.getItem('default/episodes/a'))?.status === 'paused');
     await store.updateItem('default/episodes/a', (r) => {
       r.status = 'downloading';
     });

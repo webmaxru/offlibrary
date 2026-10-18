@@ -15,7 +15,7 @@ export type {
 } from './main/offlibrary.js';
 export { Collection } from './main/collection.js';
 export type { CollectionUsage } from './main/collection.js';
-export type { CollectionConfig, ItemDescriptor, OfflibraryConfig } from './config.js';
+export type { CollectionConfig, ItemDescriptor, OfflibraryConfig, ResolvedCollectionConfig } from './config.js';
 export type { ImageResource, ItemInput, ItemStatus, OfflibraryItem, Strategy } from './types.js';
 export { OfflibraryError } from './errors.js';
 export type { OfflibraryErrorCode, SerializedError } from './errors.js';

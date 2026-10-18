@@ -68,7 +68,8 @@
     "size": "node scripts/size.mjs",
     "demo:build": "node scripts/build-demo.mjs",
     "demo": "node scripts/build-demo.mjs && node scripts/serve.mjs demo/dist",
-    "prepublishOnly": "npm run typecheck && npm test && npm run build && npm run size"
+    "prepublishOnly": "npm run typecheck && npm test && npm run build && npm run size",
+    "check:package": "node scripts/build.mjs && node scripts/check-package.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

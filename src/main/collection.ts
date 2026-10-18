@@ -83,6 +83,16 @@ export class Collection<M = unknown> {
     return this.#lib._snapshot(this.name) as readonly OfflibraryItem<M>[];
   }
 
+  /**
+   * Call `listener` whenever an item in this collection changes. Returns an unsubscribe function.
+   * Pair with {@link Collection.snapshot} for `useSyncExternalStore`, signals or stores.
+   */
+  subscribe(listener: (detail: { item: OfflibraryItem<M>; type: string }) => void): () => void {
+    return this.#lib.subscribe((d) => {
+      if (d.item.collection === this.name) listener(d as { item: OfflibraryItem<M>; type: string });
+    });
+  }
+
   /** Whether the item is fully downloaded and available offline. */
   async has(id: string): Promise<boolean> {
     return (await this.get(id))?.status === 'completed';
