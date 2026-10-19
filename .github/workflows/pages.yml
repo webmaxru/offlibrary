@@ -1,14 +1,25 @@
-name: Demo → GitHub Pages
+name: Docs site + demo → GitHub Pages
 
+# Builds the documentation site (website/, Astro + Starlight) and the demo app (demo/) into one
+# Pages artifact: the site at the Pages root, the demo under /demo/.
 on:
   push:
     branches: [main]
     paths:
+      - 'website/**'
       - 'src/**'
       - 'demo/**'
       - 'scripts/build-demo.mjs'
+      - 'CHANGELOG.md'
       - 'package.json'
       - 'package-lock.json'
+      - 'tsconfig.json'
+      - '.github/workflows/pages.yml'
+  pull_request:
+    paths:
+      - 'website/**'
+      - 'demo/**'
+      - 'src/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -18,7 +29,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -26,18 +37,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # "Last updated" dates come from git history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            website/package-lock.json
       - run: npm ci
-      - run: npm run demo:build
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - name: Build the demo
+        run: npm run demo:build
+      - id: pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v5
+      - run: npm ci
+        working-directory: website
+      - name: Build the site (+ copy the demo into dist/demo)
+        run: npm run build
+        working-directory: website
+        env:
+          ASTRO_TELEMETRY_DISABLED: 1
+          # e.g. https://salnikov.no and /offlibrary (falls back to astro.config.mjs defaults on PRs)
+          SITE_ORIGIN: ${{ steps.pages.outputs.origin }}
+          SITE_BASE: ${{ steps.pages.outputs.base_path }}
+      - name: Check internal links
+        run: node scripts/check-links.mjs dist ${{ steps.pages.outputs.base_path || '/offlibrary' }}
+        working-directory: website
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
         with:
-          path: demo/dist
+          path: website/dist
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     environment:

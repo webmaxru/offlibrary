@@ -5,7 +5,8 @@ import { offlibrarySW } from 'offlibrary/sw';
 
 offlibrarySW();
 
-const SHELL_CACHE = `radio-shell-${__SHELL_VERSION__}`;
+// 'radio-demo-shell-' (not the old 'radio-shell-'): the site root's retired worker deletes the old prefix.
+const SHELL_CACHE = `radio-demo-shell-${__SHELL_VERSION__}`;
 const SHELL = __SHELL_FILES__;
 
 self.addEventListener('install', (event) => {
@@ -16,7 +17,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       for (const name of await caches.keys()) {
-        if (name.startsWith('radio-shell-') && name !== SHELL_CACHE) await caches.delete(name);
+        if (name.startsWith('radio-demo-shell-') && name !== SHELL_CACHE) await caches.delete(name);
       }
       await self.clients.claim();
     })(),
