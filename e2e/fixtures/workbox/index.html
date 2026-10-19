@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>offlibrary + Workbox e2e</title></head>
+<body>
+<audio id="player" preload="auto"></audio>
+<script type="module">
+  import { createOfflibrary } from '/dist/offlibrary.min.js';
+
+  window.events = [];
+  await navigator.serviceWorker.register('sw.js');
+  const lib = createOfflibrary({
+    namespace: 'e2e-workbox',
+    persist: 'never',
+    collections: { media: { strategy: 'fetch', ui: { icons: [] } } },
+  });
+  await lib.ready;
+  window.media = lib.collection('media');
+  window.ready = true;
+</script>
+</body>
+</html>

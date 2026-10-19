@@ -42,8 +42,19 @@ export const p = parseRange('bytes=0-1', 10);
 `,
   );
   writeFileSync(
+    join(dir, 'workbox-sw.ts'),
+    `import { OfflibraryPlugin, initOfflibrary, offlibraryHandler, offlibraryMatch, matchOfflibrary } from 'offlibrary/workbox';
+import type { OfflibraryHandlerOptions } from 'offlibrary/workbox';
+initOfflibrary({ onComplete: (item) => console.log(item.id) });
+const options: OfflibraryHandlerOptions = { fallback: async ({ request }) => fetch(request) };
+export const route = [offlibraryMatch, offlibraryHandler(options)] as const;
+export const plugins = [new OfflibraryPlugin({ fallbackOnError: false })];
+export const m = (r: Request) => matchOfflibrary(r);
+`,
+  );
+  writeFileSync(
     join(dir, 'tsconfig.json'),
-    JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, noEmit: true, lib: ['ES2022', 'DOM'], skipLibCheck: false }, files: ['page.ts', 'sw.ts'] }),
+    JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, noEmit: true, lib: ['ES2022', 'DOM'], skipLibCheck: false }, files: ['page.ts', 'sw.ts', 'workbox-sw.ts'] }),
   );
   execFileSync(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '-p', dir], { stdio: 'inherit' });
   console.log(`✓ ${tgz} installs and type-checks as a dependency (NodeNext resolution, skipLibCheck off)`);

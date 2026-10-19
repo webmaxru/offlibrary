@@ -5,10 +5,18 @@ import { brotliCompressSync, gzipSync } from 'node:zlib';
 const budgets = [
   { name: 'offlibrary (page)', entry: 'src/index.ts', gzip: 11 * 1024 },
   { name: 'offlibrary/sw', entry: 'src/sw.ts', gzip: 4.5 * 1024 },
+  { name: 'offlibrary/workbox', entry: 'src/workbox.ts', gzip: 4.5 * 1024 },
+  // What a Workbox SW pays for the common case alone (tree-shaken): match + handler, no Background Fetch handling.
+  {
+    name: 'workbox route only',
+    stdin: "import { offlibraryMatch, offlibraryHandler } from './src/workbox.ts'; self.r = [offlibraryMatch, offlibraryHandler()];",
+    gzip: 2 * 1024,
+  },
 ];
 let failed = false;
 for (const b of budgets) {
-  const out = await build({ entryPoints: [b.entry], bundle: true, minify: true, format: 'esm', target: 'es2020', write: false, legalComments: 'none' });
+  const input = b.stdin ? { stdin: { contents: b.stdin, resolveDir: '.', loader: 'ts' } } : { entryPoints: [b.entry] };
+  const out = await build({ ...input, bundle: true, minify: true, format: 'esm', target: 'es2020', write: false, legalComments: 'none' });
   const code = out.outputFiles[0].contents;
   const gz = gzipSync(code, { level: 9 }).length;
   const br = brotliCompressSync(code).length;

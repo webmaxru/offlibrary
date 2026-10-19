@@ -1,7 +1,7 @@
 {
   "name": "offlibrary",
-  "version": "0.1.0",
-  "description": "Declarative offline asset management for the web: Background Fetch when available, a resumable streaming fallback when not, plus quota, eviction and range-request serving for offline media.",
+  "version": "0.2.0",
+  "description": "Declarative offline asset management for the web: Background Fetch when available, a resumable streaming fallback when not, plus quota, eviction, range-request serving for offline media and a Workbox plugin.",
   "keywords": [
     "background-fetch",
     "offline",
@@ -13,9 +13,11 @@
     "progressive-web-app",
     "range-requests",
     "storage",
-    "indexeddb"
+    "indexeddb",
+    "workbox",
+    "workbox-plugin"
   ],
-  "homepage": "https://github.com/webmaxru/offlibrary#readme",
+  "homepage": "https://salnikov.no/offlibrary/",
   "bugs": {
     "url": "https://github.com/webmaxru/offlibrary/issues"
   },
@@ -38,6 +40,11 @@
       "import": "./dist/sw.js",
       "default": "./dist/sw.js"
     },
+    "./workbox": {
+      "types": "./dist/workbox.d.ts",
+      "import": "./dist/workbox.js",
+      "default": "./dist/workbox.js"
+    },
     "./package.json": "./package.json"
   },
   "main": "./dist/index.js",
@@ -47,6 +54,9 @@
     "*": {
       "sw": [
         "./dist/sw.d.ts"
+      ],
+      "workbox": [
+        "./dist/workbox.d.ts"
       ]
     }
   },
@@ -61,7 +71,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/types/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "node scripts/build.mjs && vitest run --config vitest.e2e.config.ts",
@@ -76,6 +86,11 @@
     "fake-indexeddb": "^6.2.6",
     "playwright-core": "^1.64.1",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "workbox-core": "^7.4.1",
+    "workbox-precaching": "^7.4.1",
+    "workbox-range-requests": "^7.4.1",
+    "workbox-routing": "^7.4.1",
+    "workbox-strategies": "^7.4.1"
   }
 }

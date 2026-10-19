@@ -15,5 +15,7 @@ await Promise.all([
   build({ ...common, entryPoints: ['src/index.ts'], format: 'esm', outfile: 'dist/offlibrary.min.js' }),
   build({ ...common, entryPoints: ['src/sw.ts'], format: 'esm', outfile: 'dist/offlibrary-sw.min.js' }),
   build({ ...common, entryPoints: ['src/sw.ts'], format: 'iife', globalName: 'offlibrary', outfile: 'dist/offlibrary-sw.iife.js' }),
+  // For Workbox via importScripts()/workbox-sw: exposes self.offlibraryWorkbox.
+  build({ ...common, entryPoints: ['src/workbox.ts'], format: 'iife', globalName: 'offlibraryWorkbox', outfile: 'dist/offlibrary-workbox.iife.js' }),
 ]);
 console.log(`built offlibrary v${pkg.version}`);
