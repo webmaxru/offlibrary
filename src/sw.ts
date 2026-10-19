@@ -10,15 +10,16 @@
  */
 import { OfflibraryError, serializeError, toOfflibraryError } from './errors.js';
 import type { OfflibraryErrorCode } from './errors.js';
-import { broadcast, isChannelMessage, openChannel } from './internal/channel.js';
+import { broadcast } from './internal/channel.js';
 import { PREFIX, keyFromBgFetchId } from './internal/ids.js';
 import { verifyIntegrity } from './internal/integrity.js';
-import { createRangeResponse } from './internal/range.js';
+import { indexItem, isOfflibraryRequest, matchOfflibrary, watchIndex, _resetServe } from './internal/serve.js';
 import { store } from './internal/store.js';
 import { toPublicItem } from './types.js';
 import type { OfflibraryItem } from './types.js';
 
 export { createRangeResponse, parseRange } from './internal/range.js';
+export { isOfflibraryRequest, matchOfflibrary } from './internal/serve.js';
 export type { ByteRange } from './internal/range.js';
 export { verifyIntegrity } from './internal/integrity.js';
 export { OfflibraryError } from './errors.js';
@@ -66,7 +67,7 @@ export interface OfflibrarySWOptions {
   /**
    * Answer requests for stored files from the cache, with `Range` support (needed for
    * offline seeking in `<audio>`/`<video>`). Default `true`. Set `false` if you route requests
-   * yourself (e.g. with Workbox) and call {@link matchOfflibrary} there.
+   * yourself and call {@link matchOfflibrary} there. With Workbox, use `offlibrary/workbox` instead.
    */
   serve?: boolean;
   /** Called after a Background Fetch item has been stored. */
@@ -78,62 +79,6 @@ export interface OfflibrarySWOptions {
 }
 
 const sw = () => globalThis as unknown as SWGlobal;
-
-/** url → cache name for every stored file, kept in memory for synchronous fetch routing. */
-let index: Map<string, { cacheName: string; key: string }> | undefined;
-let indexLoad: Promise<void> | undefined;
-const touched = new Map<string, number>();
-
-function loadIndex(): Promise<void> {
-  indexLoad ??= store
-    .listAll()
-    .then((items) => {
-      const next = new Map<string, { cacheName: string; key: string }>();
-      for (const it of items) {
-        if (it.status !== 'completed') continue;
-        for (const url of it.urls) next.set(url, { cacheName: it.cacheName, key: it.key });
-      }
-      index = next;
-    })
-    .catch(() => {
-      index ??= new Map();
-    })
-    .finally(() => {
-      indexLoad = undefined;
-    });
-  return indexLoad;
-}
-
-function stripHash(url: string): string {
-  const i = url.indexOf('#');
-  return i === -1 ? url : url.slice(0, i);
-}
-
-/**
- * Find a stored file for a request and answer it, honouring `Range`. Resolves `undefined` when the
- * URL is not stored. Use this inside your own fetch routing (e.g. a Workbox route handler).
- */
-export async function matchOfflibrary(request: Request): Promise<Response | undefined> {
-  if (request.method !== 'GET') return undefined;
-  if (!index) await loadIndex();
-  const url = stripHash(request.url);
-  const hit = index!.get(url);
-  if (!hit) return undefined;
-  const cache = await caches.open(hit.cacheName);
-  const cached = await cache.match(url);
-  if (!cached) return undefined;
-  touch(hit.key);
-  return createRangeResponse(cached, request.headers.get('Range'));
-}
-
-function touch(key: string): void {
-  const t = Date.now();
-  if (t - (touched.get(key) ?? 0) < 60_000) return;
-  touched.set(key, t);
-  void store.updateItem(key, (r) => {
-    r.lastAccessedAt = t;
-  }).catch(() => undefined);
-}
 
 const failCode = (reason: string): OfflibraryErrorCode =>
   ({
@@ -231,7 +176,7 @@ async function onSuccess(event: BackgroundFetchEventLike, key: string, options: 
       await Promise.all(writes.map(([url]) => cache.delete(url)));
       return;
     }
-    if (index) for (const url of done.urls) index.set(url, { cacheName: done.cacheName, key });
+    indexItem(done.urls, done.cacheName, key);
     await updateUI(event, done.ui?.successTitle, done.ui?.icons);
     broadcast({ kind: 'complete', key });
     await options.onComplete?.(toPublicItem(done), event);
@@ -311,38 +256,21 @@ export function offlibrarySW(options: OfflibrarySWOptions = {}): void {
   }
 
   // Keep the routing index fresh when pages complete/delete items.
-  const channel = openChannel();
-  if (channel) {
-    channel.onmessage = (e: MessageEvent) => {
-      if (isChannelMessage(e.data)) void loadIndex();
-    };
-  }
-  void loadIndex();
+  watchIndex();
 
   if (options.serve === false) return;
   self.addEventListener('fetch', (e) => {
     const event = e as FetchEventLike;
     const { request } = event;
-    if (request.method !== 'GET' || request.mode === 'navigate') return;
-    if (index) {
-      if (!index.has(stripHash(request.url))) return;
-    } else if (!COLD_START_DESTINATIONS.has(request.destination) && !request.headers.has('Range')) {
-      // The worker just started and the index is still loading. Only claim requests that are
-      // plausibly stored media; everything else stays with the app's own handlers (e.g. app shell).
-      return;
-    }
+    // Claim only stored files (plus plausible media while the index loads after a worker start);
+    // everything else stays with the app's own handlers, e.g. an app-shell cache.
+    if (!isOfflibraryRequest(request)) return;
     event.respondWith(matchOfflibrary(request).then((r) => r ?? fetch(request)));
   });
 }
 
-/** Request destinations answered while the routing index is still loading after a worker start. */
-const COLD_START_DESTINATIONS = new Set(['audio', 'video', 'track', 'image']);
-
 /** @internal Exposed for tests. */
 export const _internals = {
-  reloadIndex: (): Promise<void> => {
-    index = undefined;
-    return loadIndex();
-  },
+  reloadIndex: (): Promise<void> => _resetServe(),
   prefix: PREFIX,
 };
