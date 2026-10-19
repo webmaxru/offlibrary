@@ -20,6 +20,7 @@
  * registerRoute(offlibraryMatch, offlibraryHandler({ fallback: new NetworkOnly() }));
  * ```
  * @packageDocumentation
+ * @module offlibrary/workbox
  */
 import { isOfflibraryRequest, matchOfflibrary, watchIndex } from './internal/serve.js';
 import { offlibrarySW } from './sw.js';
@@ -69,7 +70,7 @@ export type WorkboxRouteHandler =
  * registerRoute(offlibraryMatch, offlibraryHandler({ fallback: new NetworkOnly() }));
  * ```
  */
-export const offlibraryMatch = ({ request }: WorkboxRouteMatchOptions): boolean => isOfflibraryRequest(request);
+export const offlibraryMatch = (options: WorkboxRouteMatchOptions): boolean => isOfflibraryRequest(options.request);
 
 /** Options for {@link offlibraryHandler}. */
 export interface OfflibraryHandlerOptions {

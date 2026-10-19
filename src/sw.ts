@@ -7,6 +7,7 @@
  * offlibrarySW();
  * ```
  * @packageDocumentation
+ * @module offlibrary/sw
  */
 import { OfflibraryError, serializeError, toOfflibraryError } from './errors.js';
 import type { OfflibraryErrorCode } from './errors.js';

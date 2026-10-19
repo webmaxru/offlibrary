@@ -4,6 +4,7 @@
  *
  * Page entry point. For the service worker, import from `offlibrary/sw`.
  * @packageDocumentation
+ * @module offlibrary
  */
 export { createOfflibrary, Offlibrary } from './main/offlibrary.js';
 export type {
