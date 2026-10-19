@@ -12,7 +12,7 @@ npm.cmd login --registry https://registry.npmjs.org
 npm.cmd whoami --registry https://registry.npmjs.org
 ```
 
-The package name **`offlibrary`** was unclaimed on npm on 2026-10-18 (`npm view offlibrary` → 404). If it's taken by the time you publish, rename it in `package.json` to the scoped fallback `@webmaxru/offlibrary` (also unclaimed then). Then update the import paths in README.md, and publish with `--access public` as below.
+`offlibrary` 0.1.0 was published on 2026-10-19 (tag `v0.1.0`), so the name is yours; `--access public` below is harmless for an unscoped package.
 
 ## Release steps
 
@@ -29,11 +29,13 @@ npm.cmd test
 npm.cmd run build
 npm.cmd run size
 
-# 3. Optional: the browser e2e suite (downloads Chromium once)
+# 3. Optional: the browser e2e suites (downloads Chromium once). They cover real Background Fetch,
+#    the fetch fallback, and a real Workbox service worker using offlibrary/workbox.
 npx.cmd playwright-core install chromium
 npm.cmd run test:e2e
 
-# 4. Check what will be published (expect 35 files: dist/, README.md, LICENSE, CHANGELOG.md, package.json)
+# 4. Check what will be published (0.2.0: 40 files, about 61 kB packed: dist/ incl. the workbox entry,
+#    README.md, LICENSE, CHANGELOG.md, package.json)
 npm.cmd pack --dry-run
 npm.cmd run check:package   # installs the tarball into a temp project and type-checks it
 
@@ -45,16 +47,18 @@ npm.cmd publish --access public --registry https://registry.npmjs.org --otp 1234
 npm.cmd view offlibrary version --registry https://registry.npmjs.org
 
 # 7. Tag the release
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 Then create a GitHub release from the tag and paste the CHANGELOG section into it.
 
+The documentation site (https://salnikov.no/offlibrary/) and the demo deploy on their own from `main` (workflow **Docs site + demo → GitHub Pages**); they build from the repo's source, not from npm, so they don't wait for the publish.
+
 The CDN links in the README (`cdn.jsdelivr.net/npm/offlibrary@0/...`) work as soon as npm has the version. If jsDelivr serves an older copy, purge the files:
 
 ```powershell
-'offlibrary.min.js','offlibrary-sw.min.js','offlibrary-sw.iife.js' | ForEach-Object {
+'offlibrary.min.js','offlibrary-sw.min.js','offlibrary-sw.iife.js','offlibrary-workbox.iife.js' | ForEach-Object {
   Invoke-RestMethod "https://purge.jsdelivr.net/npm/offlibrary@0/dist/$_" | Select-Object -ExpandProperty status
 }
 ```

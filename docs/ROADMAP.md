@@ -27,7 +27,14 @@ Status key: ✅ shipped in the current version · 🔜 next · 💡 idea, open f
 | ✅ Demo podcast PWA | Public-domain LibriVox episodes, progress, cancel, delete, storage meter, offline playback, installable, GitHub Pages |
 | ✅ npm readiness | `exports`, types, `files`, `sideEffects`, size budget in CI, RELEASING.md |
 
-## v0.2: next
+## v0.2 (shipped in 0.2.0)
+
+| Feature | Notes |
+|---|---|
+| ✅ `offlibrary/workbox` | `OfflibraryPlugin` (`cachedResponseWillBeUsed`, `handlerDidError`), `offlibraryMatch` + `offlibraryHandler({ fallback })`, `initOfflibrary()`. No Workbox import at runtime; unit-tested inside real Workbox strategies and e2e-tested in a bundled Workbox SW |
+| ✅ Documentation site | Astro + Starlight on GitHub Pages, API reference generated from the TSDoc, demo under `/demo/` |
+
+## Next
 
 - 🔜 **Framework adapters** as tiny subpath exports: `offlibrary/react` (`useOfflibrary`, `useItem`), `offlibrary/vue`, `offlibrary/svelte`. All are built on `subscribe()`.
 - 🔜 **Download queue with concurrency** for the fallback (`concurrency: 2`), with queued items shown as `queued`.

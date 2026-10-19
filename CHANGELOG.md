@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Until 1.0, minor versions may contain breaking changes, and they will be called out.
 
+## [0.2.0] - 2026-10-20
+
+### Added
+
+- **`offlibrary/workbox`**, a first-class Workbox integration (new subpath export, no runtime dependency on Workbox, works with Workbox 6 and 7):
+  - `OfflibraryPlugin`: a Workbox plugin. `cachedResponseWillBeUsed` serves stored files (with `206` for `Range`) inside CacheFirst, CacheOnly and NetworkFirst's cache step; `handlerDidError` makes them the offline fallback for NetworkOnly/NetworkFirst. Compatible with `RangeRequestsPlugin`.
+  - `offlibraryMatch` + `offlibraryHandler({ fallback })`: a ready-made route for the common case. Misses go to any Workbox strategy or handler.
+  - `initOfflibrary(options)`: Background Fetch handling without a `fetch` listener, so Workbox owns routing.
+  - `dist/offlibrary-workbox.iife.js` for `workbox-sw`/`importScripts` users (`self.offlibraryWorkbox`).
+  - Size budget: 4.5 KB gzip for the whole entry; the route alone is about 1.7 KB.
+- `isOfflibraryRequest(request)` in `offlibrary/sw`: the synchronous routing decision `offlibrarySW()` uses.
+- Documentation site: https://salnikov.no/offlibrary/ (Astro + Starlight), with guides, concepts and a generated API reference. The demo moved to https://salnikov.no/offlibrary/demo/.
+
+### Changed
+
+- The service-worker module's routing index and `matchOfflibrary()` moved into a shared internal module used by both `offlibrary/sw` and `offlibrary/workbox`. Behaviour is unchanged; the index now starts loading and listening for updates on first use, too, not only in `offlibrarySW()`.
+
 ## [0.1.0] - 2026-10-18
 
 The first release: a full rewrite of the 2022 prototype.
@@ -52,4 +69,5 @@ The first release: a full rewrite of the 2022 prototype.
 
 - The 2022 Create React App example and the Express test server, including its committed `node_modules`. They are still in git history (`3e14a45`).
 
+[0.2.0]: https://github.com/webmaxru/offlibrary/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/webmaxru/offlibrary/releases/tag/v0.1.0

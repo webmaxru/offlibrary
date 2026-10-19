@@ -295,9 +295,12 @@ Each `OfflibraryError` has a stable `code` (plus `status` for HTTP errors, and `
 |---|---|
 | `offlibrarySW(options?)` | Installs the handlers. Options: `serve` (default `true`), `onComplete(item, event)`, `onFail(item, event)`, `onClick(item, event)` (return `true` to skip the default focus/open). Call it before your other `fetch` listeners. |
 | `matchOfflibrary(request)` | `Promise<Response \| undefined>`: the stored file for a request, with `Range` handled. Use it in your own routing. |
+| `isOfflibraryRequest(request)` | Synchronous: would Offlibrary answer this request? (Stored URL, or media/`Range` while the index loads after a worker start.) |
 | `handleBackgroundFetchEvent(event, options?)` | Handles one `backgroundfetch*` event. Returns `false` for IDs that aren't Offlibrary's. |
 | `createRangeResponse(response, rangeHeader)` / `parseRange(header, size)` | The range helpers on their own. |
 | `verifyIntegrity(blob, sri)` | SRI check helper. |
+
+Workbox users: see [`offlibrary/workbox`](#workbox).
 
 ### Utilities: `offlibrary`
 
@@ -389,16 +392,42 @@ function Episode({ ep }) {
 }
 ```
 
-### Workbox: route stored files yourself
+### Workbox
+
+`offlibrary/workbox` plugs stored files into Workbox routes and strategies, with `Range` support. It imports nothing from Workbox (no peer dependency, ~1.7 KB gzipped for the route alone) and works with Workbox 6 and 7.
 
 ```js
+// sw.js
+import { precacheAndRoute } from 'workbox-precaching';
 import { registerRoute } from 'workbox-routing';
-import { offlibrarySW, matchOfflibrary } from 'offlibrary/sw';
+import { NetworkOnly } from 'workbox-strategies';
+import { initOfflibrary, offlibraryMatch, offlibraryHandler } from 'offlibrary/workbox';
 
-offlibrarySW({ serve: false });                      // keep Background Fetch handling, skip routing
-registerRoute(({ request }) => request.destination === 'audio', async ({ request }) =>
-  (await matchOfflibrary(request)) ?? fetch(request));
+initOfflibrary();                                   // Background Fetch handling, no fetch listener
+precacheAndRoute(self.__WB_MANIFEST);               // your app shell, as usual
+registerRoute(offlibraryMatch, offlibraryHandler({ fallback: new NetworkOnly() }));
 ```
+
+Already have a media route? Add the plugin instead:
+
+```js
+import { CacheFirst } from 'workbox-strategies';
+import { OfflibraryPlugin } from 'offlibrary/workbox';
+
+registerRoute(
+  ({ request }) => request.destination === 'audio',
+  new CacheFirst({ cacheName: 'audio', plugins: [new OfflibraryPlugin()] }),
+);
+```
+
+| Export | What it does |
+|---|---|
+| `offlibraryMatch` | Route match callback: `true` for stored files (and, right after the worker starts, for media and `Range` requests while the index loads). |
+| `offlibraryHandler({ fallback })` | Route handler: the stored file (`200`/`206`), else `fallback` (any strategy or handler; default `fetch`). |
+| `new OfflibraryPlugin(options)` | Plugin for any strategy. `cachedResponseWillBeUsed` serves stored files in CacheFirst/CacheOnly/the cache step of NetworkFirst; `handlerDidError` makes them the offline fallback for NetworkOnly/NetworkFirst. Options: `serveFromCache`, `fallbackOnError` (both default `true`). |
+| `initOfflibrary(options)` | Same as `offlibrarySW({ ...options, serve: false })`. |
+
+Using `workbox-sw` with `importScripts`? Load `https://cdn.jsdelivr.net/npm/offlibrary@0/dist/offlibrary-workbox.iife.js`; the same exports are on `self.offlibraryWorkbox`. Without Workbox, `offlibrarySW({ serve: false })` + `matchOfflibrary(request)` from `offlibrary/sw` remain the low-level building blocks.
 
 ## The fallback, in detail
 
@@ -441,7 +470,7 @@ For Background Fetch and offline range serving, yes. Without one, Offlibrary sti
 
 **Can I use it with Workbox / Vite PWA / my own service worker?**
 
-Yes. Call `offlibrarySW()` at the top of your worker. If you route requests yourself, use `offlibrarySW({ serve: false })` + `matchOfflibrary()`.
+Yes. Call `offlibrarySW()` at the top of your own worker. With Workbox (including Vite PWA's `injectManifest`), use [`offlibrary/workbox`](#workbox). If you route requests yourself, use `offlibrarySW({ serve: false })` + `matchOfflibrary()`.
 
 **Why not just use `<a download>`?**
 
