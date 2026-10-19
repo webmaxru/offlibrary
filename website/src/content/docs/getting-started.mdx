@@ -1,0 +1,140 @@
+---
+title: Getting started
+description: Install Offlibrary, add a service worker, and make your first file available offline.
+---
+
+import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+<Steps>
+
+1. **Install the package.**
+
+   <Tabs syncKey="pkg">
+     <TabItem label="npm">
+     ```sh
+     npm install offlibrary
+     ```
+     </TabItem>
+     <TabItem label="pnpm">
+     ```sh
+     pnpm add offlibrary
+     ```
+     </TabItem>
+     <TabItem label="Yarn">
+     ```sh
+     yarn add offlibrary
+     ```
+     </TabItem>
+   </Tabs>
+
+   Requirements: a browser with service workers, the Cache API and IndexedDB (every evergreen browser). Background Fetch is used when present.
+
+2. **Add Offlibrary to your service worker.** Pick your path:
+
+   <Tabs syncKey="sw">
+     <TabItem label="Your own service worker (offlibrary/sw)">
+     A service worker at the root of your site, bundled by Vite, webpack, esbuild or similar:
+
+     ```js
+     // sw.js
+     import { offlibrarySW } from 'offlibrary/sw';
+
+     offlibrarySW(); // Background Fetch handling + serving stored files with Range support
+     ```
+
+     No bundler? Load the IIFE build:
+
+     ```js
+     // sw.js
+     importScripts('https://cdn.jsdelivr.net/npm/offlibrary@0/dist/offlibrary-sw.iife.js');
+     offlibrary.offlibrarySW();
+     ```
+     </TabItem>
+     <TabItem label="Already using Workbox (offlibrary/workbox)">
+     Add three lines to your Workbox service worker (`injectManifest`):
+
+     ```js
+     // sw.js
+     import { precacheAndRoute } from 'workbox-precaching';
+     import { registerRoute } from 'workbox-routing';
+     import { NetworkOnly } from 'workbox-strategies';
+     import { initOfflibrary, offlibraryMatch, offlibraryHandler } from 'offlibrary/workbox';
+
+     initOfflibrary();                       // Background Fetch handling, no fetch listener
+     precacheAndRoute(self.__WB_MANIFEST);   // your app shell, as before
+     registerRoute(offlibraryMatch, offlibraryHandler({ fallback: new NetworkOnly() }));
+     ```
+
+     No extra dependency: `offlibrary/workbox` imports nothing from Workbox. Setup for `workbox-sw` and Vite PWA, the plugin for existing strategies, and more: [Offlibrary for Workbox](/offlibrary/workbox/).
+     </TabItem>
+   </Tabs>
+
+3. **Create the library in your page** and describe your collections:
+
+   ```js
+   // library.js
+   import { createOfflibrary } from 'offlibrary';
+
+   navigator.serviceWorker.register('/sw.js');
+
+   export const library = createOfflibrary({
+     namespace: 'podcast',
+     collections: {
+       episodes: {
+         maxItems: 20, // keep the 20 most recently used
+         ui: { icons: [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }] },
+         clickUrl: (item) => `/episodes/${item.id}`, // notification tap opens the episode
+       },
+     },
+   });
+   ```
+
+4. **Download, and show progress.**
+
+   ```js
+   import { library } from './library.js';
+
+   const episodes = library.collection('episodes');
+
+   library.on('progress', ({ item }) => render(item)); // item.progress is 0..1, or null if the size is unknown
+   library.on('complete', ({ item }) => toast(`${item.title} is ready offline`));
+   library.on('error', ({ item, error }) => console.warn(item.id, error.code));
+
+   downloadButton.onclick = () =>
+     episodes.download({ id: ep.guid, url: ep.enclosure, title: ep.title, size: ep.length });
+   ```
+
+   `download()` resolves once the download has **started**. To wait for the end, use `await episodes.done(id)`.
+
+5. **Play it, online or offline**, with the original URL. The service worker answers from the device when the file is stored, including `Range` requests:
+
+   ```js
+   audio.src = ep.enclosure;
+   ```
+
+</Steps>
+
+<Aside type="caution" title="Cross-origin files need CORS">
+Files on another origin must be served with `Access-Control-Allow-Origin`, and should allow `Range` for resuming. Opaque responses are rejected with `opaque-response`, because they can't be measured, verified or range-served.
+</Aside>
+
+## Check it works
+
+1. Open your app, download a file and wait for `complete`.
+2. In DevTools → Application → Cache Storage, you'll see a cache named `offlibrary:<namespace>:<collection>` with the file under its original URL.
+3. Switch DevTools → Network to **Offline**, reload, and play the file. Seeking works because the service worker answers `Range` with `206`.
+
+## Without a service worker
+
+Offlibrary still downloads (with the fetch transport), tracks progress and manages storage. Read stored files yourself:
+
+```js
+const blob = await episodes.blob('ep-42');
+audio.src = URL.createObjectURL(blob);
+```
+
+## Next
+
+- [Collections](/offlibrary/concepts/collections/) and [strategies](/offlibrary/concepts/strategies/): the model behind the config.
+- [Configuration reference](/offlibrary/reference/configuration/): every option.
+- [Build a podcast app](/offlibrary/guides/podcast/): a complete walk-through.

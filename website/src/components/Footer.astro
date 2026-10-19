@@ -1,0 +1,22 @@
+---
+import Default from '@astrojs/starlight/components/Footer.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+
+<Default><slot /></Default>
+<p class="ol-footer">
+  MIT © Maxim Salnikov · <a href="https://github.com/webmaxru/offlibrary">GitHub</a> ·
+  <a href="https://www.npmjs.com/package/offlibrary">npm</a> · <a href={`${base}/demo/`}>Demo</a>
+</p>
+
+<style>
+  .ol-footer {
+    margin-top: 2rem;
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-3);
+    text-align: center;
+  }
+  .ol-footer a {
+    color: var(--sl-color-gray-2);
+  }
+</style>

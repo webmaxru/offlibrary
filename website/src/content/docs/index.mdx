@@ -1,0 +1,170 @@
+---
+title: Offlibrary
+description: Declarative offline asset management for the web. Background Fetch when the browser has it, a resumable streaming fallback when it doesn't, with quota, eviction and offline seeking built in.
+template: splash
+editUrl: false
+lastUpdated: false
+head:
+  - tag: title
+    content: Offlibrary · offline files for the web, in one config
+hero:
+  title: Offline files for the web, in one config.
+  tagline: Download podcasts, video lessons, map tiles or AI models with one call. Offlibrary uses Background Fetch when the browser has it and a resumable streaming fallback when it doesn't, and serves files back with Range support so media seeks offline.
+  image:
+    html: |
+      <div class="ol-device" aria-hidden="true">
+        <div class="ol-device__bar"><span>library.collection('episodes')</span><span>3 items</span></div>
+        <div class="ol-row">
+          <div class="ol-row__icon">♪</div>
+          <div class="ol-row__title">Ep. 42 · The Signal-Man</div>
+          <div class="ol-badge">Background Fetch</div>
+          <div class="ol-progress"><span style="--p: 68%"></span></div>
+        </div>
+        <div class="ol-row">
+          <div class="ol-row__icon ol-row__icon--b">▶</div>
+          <div class="ol-row__title">Lesson 3 · Web Vitals</div>
+          <div class="ol-badge">fetch · paused</div>
+          <div class="ol-progress"><span style="--p: 41%"></span></div>
+        </div>
+        <div class="ol-row">
+          <div class="ol-row__icon ol-row__icon--c">⌖</div>
+          <div class="ol-row__title">Oslo centre · tiles</div>
+          <div class="ol-badge ol-badge--ok">✓ offline</div>
+          <div class="ol-row__meta">182 MB · pinned · sha256 verified</div>
+        </div>
+        <div class="ol-device__foot"><span>Storage</span><div class="ol-meter"><span></span></div><span>2.1 of 12 GB</span></div>
+      </div>
+  actions:
+    - text: Get started
+      link: /offlibrary/getting-started/
+      icon: right-arrow
+    - text: Try the demo
+      link: /offlibrary/demo/
+      icon: external
+      variant: secondary
+    - text: View on GitHub
+      link: https://github.com/webmaxru/offlibrary
+      icon: github
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard, Tabs, TabItem, Code } from '@astrojs/starlight/components';
+
+## Why Offlibrary
+
+Making a file available offline takes five browser APIs that don't know about each other: Background Fetch, service workers, the Cache API, IndexedDB and the Storage API. Then come the edge cases nobody wants to write twice: re-attaching to a download after a reload, resuming a half-finished file, answering `Range` so `<audio>` can seek, staying under quota, and falling back in every browser that has no Background Fetch.
+
+Offlibrary wraps all of it behind **a config object and one method**.
+
+<CardGrid>
+  <Card title="Configuration-first" icon="setting">
+    Describe *collections* (episodes, lessons, tiles) and their policies once: transport, size threshold, limits, retries, notification UI.
+  </Card>
+  <Card title="Background Fetch when available" icon="cloud-download">
+    Downloads keep going after the tab or the browser closes, with the browser's own progress notification, and **re-attach after reloads**.
+  </Card>
+  <Card title="Resumable fallback everywhere else" icon="random">
+    Streaming `fetch` with live progress, pause, resume, cancel and retries. Partial data is checkpointed to IndexedDB and resumes with `Range`, even after a reload.
+  </Card>
+  <Card title="Offline media that seeks" icon="mobile-android">
+    The service-worker module answers `Range` with `206 Partial Content` straight from the cache. Use the original URL; it just works offline.
+  </Card>
+  <Card title="Storage you can reason about" icon="database">
+    Quota pre-checks, `persist()`, per-collection `maxItems` / `maxBytes` with LRU eviction, and pinned items that are never evicted.
+  </Card>
+  <Card title="First-class Workbox plugin" icon="puzzle">
+    `offlibrary/workbox` brings stored files into your Workbox routes and strategies: `OfflibraryPlugin`, a ready-made route, and Background Fetch handling. No extra dependency. [Learn more](/offlibrary/workbox/).
+  </Card>
+</CardGrid>
+
+## Install
+
+<Tabs syncKey="pkg">
+  <TabItem label="npm" icon="seti:npm">
+    <Code code="npm install offlibrary" lang="sh" />
+  </TabItem>
+  <TabItem label="pnpm" icon="pnpm">
+    <Code code="pnpm add offlibrary" lang="sh" />
+  </TabItem>
+  <TabItem label="Yarn" icon="seti:yarn">
+    <Code code="yarn add offlibrary" lang="sh" />
+  </TabItem>
+  <TabItem label="Bun" icon="bun">
+    <Code code="bun add offlibrary" lang="sh" />
+  </TabItem>
+  <TabItem label="CDN">
+    <Code code={`import { createOfflibrary } from 'https://cdn.jsdelivr.net/npm/offlibrary@0/dist/offlibrary.min.js';`} lang="js" />
+  </TabItem>
+</Tabs>
+
+About 10 KB gzipped on the page and 4 KB in the service worker. Zero runtime dependencies, TypeScript types included.
+
+## One config, one call
+
+<Tabs>
+  <TabItem label="page.js">
+```js
+import { createOfflibrary } from 'offlibrary';
+
+navigator.serviceWorker.register('/sw.js');
+
+const library = createOfflibrary({
+  namespace: 'podcast',
+  collections: { episodes: { maxItems: 20 } }, // keep the 20 most recently used
+});
+
+library.on('progress', ({ item }) => render(item)); // item.progress is 0..1
+await library.collection('episodes').download({
+  id: 'ep-42',
+  url: 'https://cdn.example.com/ep-42.mp3',
+  title: 'Episode 42',
+});
+
+// Later, offline: same URL, served from the device, seeking included.
+audio.src = 'https://cdn.example.com/ep-42.mp3';
+```
+  </TabItem>
+  <TabItem label="sw.js">
+```js
+import { offlibrarySW } from 'offlibrary/sw';
+
+// Stores finished Background Fetches, updates the notification,
+// and serves stored files with Range support.
+offlibrarySW();
+```
+  </TabItem>
+  <TabItem label="sw.js (Workbox)">
+```js
+import { precacheAndRoute } from 'workbox-precaching';
+import { registerRoute } from 'workbox-routing';
+import { NetworkOnly } from 'workbox-strategies';
+import { initOfflibrary, offlibraryMatch, offlibraryHandler } from 'offlibrary/workbox';
+
+initOfflibrary();
+precacheAndRoute(self.__WB_MANIFEST);
+registerRoute(offlibraryMatch, offlibraryHandler({ fallback: new NetworkOnly() }));
+```
+  </TabItem>
+</Tabs>
+
+## Pick your path
+
+<CardGrid>
+  <LinkCard title="Getting started" description="Install, a minimal page and service worker, and your first offline file in five minutes." href="/offlibrary/getting-started/" />
+  <LinkCard title="Build a podcast app" description="Sync with a feed, keep the latest downloads, play and seek offline." href="/offlibrary/guides/podcast/" />
+  <LinkCard title="Video course" description="One lesson = video + subtitles + poster, with one progress bar." href="/offlibrary/guides/video-course/" />
+  <LinkCard title="Offline map tiles" description="A pinned, versioned, integrity-checked area pack." href="/offlibrary/guides/map-tiles/" />
+  <LinkCard title="Already using Workbox?" description="offlibrary/workbox: a plugin and a ready-made route for your existing Workbox service worker." href="/offlibrary/workbox/" />
+  <LinkCard title="API reference" description="Every export of offlibrary, offlibrary/sw and offlibrary/workbox, generated from the source." href="/offlibrary/api/readme/" />
+</CardGrid>
+
+## Works in every browser, best in Chromium
+
+| Browser | Transport | What you get |
+|---|---|---|
+| Chrome, Edge, Opera, Samsung Internet | Background Fetch | Downloads survive tab and browser close, with a system notification |
+| Firefox, Safari (incl. iOS), Android WebView | Resumable streaming `fetch` | Same API and events; pauses when the tab closes, resumes on the next visit |
+
+Background Fetch is Chromium-only, so Offlibrary treats it as a progressive enhancement. [Browser support, with dates](/offlibrary/browser-support/).
+
+<LinkCard title="Try Offlibrary Radio" description="An installable podcast PWA built with Offlibrary: nine public-domain LibriVox stories to download, then play offline." href="/offlibrary/demo/" />

@@ -1,0 +1,98 @@
+---
+title: Setup
+description: Add offlibrary/workbox to a bundled Workbox service worker, a workbox-sw (importScripts) worker, or a Vite PWA project.
+---
+
+import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
+
+<Steps>
+
+1. Install Offlibrary next to the Workbox packages you already use:
+
+   ```sh
+   npm install offlibrary workbox-precaching workbox-routing workbox-strategies
+   ```
+
+2. Add three lines to your service worker (pick your setup below).
+
+3. In the page, create the library and download as usual:
+
+   ```js
+   import { createOfflibrary } from 'offlibrary';
+   const library = createOfflibrary({ collections: { episodes: { maxItems: 20 } } });
+   await library.collection('episodes').download({ id: 'ep-42', url: 'https://cdn.example.com/ep-42.mp3' });
+   ```
+
+</Steps>
+
+## Service worker
+
+<Tabs>
+  <TabItem label="Bundled (injectManifest)">
+```js
+// sw.js, built by workbox-build/workbox-cli "injectManifest", webpack's InjectManifest, or your bundler
+import { precacheAndRoute } from 'workbox-precaching';
+import { registerRoute } from 'workbox-routing';
+import { NetworkOnly } from 'workbox-strategies';
+import { initOfflibrary, offlibraryMatch, offlibraryHandler } from 'offlibrary/workbox';
+
+initOfflibrary();
+precacheAndRoute(self.__WB_MANIFEST);
+registerRoute(offlibraryMatch, offlibraryHandler({ fallback: new NetworkOnly() }));
+```
+  </TabItem>
+  <TabItem label="workbox-sw (importScripts)">
+```js
+// sw.js, no bundler
+importScripts('https://storage.googleapis.com/workbox-cdn/releases/7.4.1/workbox-sw.js');
+importScripts('https://cdn.jsdelivr.net/npm/offlibrary@0/dist/offlibrary-workbox.iife.js');
+
+const { initOfflibrary, offlibraryMatch, offlibraryHandler } = self.offlibraryWorkbox;
+
+initOfflibrary();
+workbox.routing.registerRoute(
+  offlibraryMatch,
+  offlibraryHandler({ fallback: new workbox.strategies.NetworkOnly() }),
+);
+```
+  </TabItem>
+  <TabItem label="Vite PWA">
+```js
+// vite.config.js
+import { VitePWA } from 'vite-plugin-pwa';
+export default {
+  plugins: [VitePWA({ strategies: 'injectManifest', srcDir: 'src', filename: 'sw.js' })],
+};
+```
+```js
+// src/sw.js
+import { precacheAndRoute } from 'workbox-precaching';
+import { registerRoute } from 'workbox-routing';
+import { NetworkOnly } from 'workbox-strategies';
+import { initOfflibrary, offlibraryMatch, offlibraryHandler } from 'offlibrary/workbox';
+
+initOfflibrary();
+precacheAndRoute(self.__WB_MANIFEST);
+registerRoute(offlibraryMatch, offlibraryHandler({ fallback: new NetworkOnly() }));
+```
+  </TabItem>
+</Tabs>
+
+`generateSW` modes (workbox-build's `generateSW`, Vite PWA's default) write the whole service worker for you, so there's no place to call `initOfflibrary()`. Switch those projects to `injectManifest`; your existing runtime-caching rules become a few `registerRoute()` calls.
+
+## What to import
+
+| You need | Import |
+|---|---|
+| The common route | `offlibraryMatch`, `offlibraryHandler` |
+| Offlibrary inside an existing strategy | `OfflibraryPlugin` |
+| Background Fetch (Chromium) | `initOfflibrary` |
+| Your own handler logic | `matchOfflibrary`, `isOfflibraryRequest` |
+
+Everything is tree-shakable; import only what you use. Types ship with the package.
+
+## Verify
+
+1. Download a file in the page and wait for the `complete` event.
+2. DevTools → Application → Service workers: your Workbox worker is active (there's no second worker).
+3. Network → Offline, then play the file and seek. Requests show as served by the service worker, with `206` for ranges.

@@ -1,0 +1,25 @@
+{
+  "name": "offlibrary-website",
+  "private": true,
+  "type": "module",
+  "description": "Documentation site for Offlibrary (Astro + Starlight).",
+  "scripts": {
+    "dev": "node scripts/sync-changelog.mjs && astro dev",
+    "build": "node scripts/sync-changelog.mjs && astro build && node scripts/postbuild.mjs",
+    "preview": "astro preview",
+    "check:links": "node scripts/check-links.mjs dist",
+    "check:browser": "node scripts/check-browser.mjs"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.42.6",
+    "astro": "^7.4.1",
+    "starlight-links-validator": "^0.27.0",
+    "starlight-typedoc": "^0.23.1",
+    "typedoc": "^0.28.20",
+    "typedoc-plugin-markdown": "^4.14.1",
+    "typescript": "~5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,55 @@
+---
+title: Offlibrary for Workbox
+description: Why and how to use Offlibrary inside a Workbox service worker with offlibrary/workbox.
+---
+
+import { CardGrid, LinkCard, Aside } from '@astrojs/starlight/components';
+
+[Workbox](https://developer.chrome.com/docs/workbox) is how most production service workers are built: precaching for the app shell, routing, and caching strategies. If yours is one of them, you don't need a second service worker or a second `fetch` listener to use Offlibrary. **`offlibrary/workbox`** plugs it into Workbox:
+
+| Export | What it is | Use it when |
+|---|---|---|
+| [`offlibraryMatch` + `offlibraryHandler()`](/offlibrary/workbox/route/) | A ready-made Workbox route | You want "stored files from the device, everything else from the network" in one line |
+| [`OfflibraryPlugin`](/offlibrary/workbox/plugin/) | A Workbox plugin | You already have a media route and strategy, and want it to know about downloads |
+| [`initOfflibrary()`](/offlibrary/workbox/background-fetch/) | Background Fetch handling without a `fetch` listener | Always, if you use Background Fetch (the default in Chromium) |
+
+```js
+// sw.js
+import { precacheAndRoute } from 'workbox-precaching';
+import { registerRoute } from 'workbox-routing';
+import { NetworkOnly } from 'workbox-strategies';
+import { initOfflibrary, offlibraryMatch, offlibraryHandler } from 'offlibrary/workbox';
+
+initOfflibrary();
+precacheAndRoute(self.__WB_MANIFEST);
+registerRoute(offlibraryMatch, offlibraryHandler({ fallback: new NetworkOnly() }));
+```
+
+The page side is the same as without Workbox: `createOfflibrary()` and `download()`.
+
+## Why a dedicated entry
+
+Workbox caches what *the network* sends while the app runs. Offlibrary stores what *the user chose* to keep: whole episodes, lessons and map packs, downloaded with Background Fetch or a resumable fallback, under quota and LRU rules. To play those files offline, the service worker must find them and answer `Range` requests, inside Workbox's routing. That's what this entry does, with the same matching and `Range` logic as `offlibrarySW()`.
+
+## No Workbox inside
+
+`offlibrary/workbox` **imports nothing from Workbox**. The plugin and the route handler are plain objects that match Workbox's interfaces, and they're type-checked against `workbox-core`'s own types in CI. So:
+
+- no peer dependency, and never a second copy of Workbox in your bundle;
+- works with Workbox 6 and 7, bundled or loaded with `workbox-sw` (tested against Workbox 7.4);
+- the route alone costs ~1.7 KB gzipped; the whole entry, Background Fetch handling included, ~4.2 KB.
+
+It lives in the main `offlibrary` package as a subpath export, so versions can't drift apart.
+
+<Aside type="note">
+Workbox is a set of npm packages (`workbox-routing`, `workbox-strategies`, …). Install the ones your service worker imports; Offlibrary doesn't install them for you.
+</Aside>
+
+## Read next
+
+<CardGrid>
+  <LinkCard title="Setup" description="Bundled, workbox-sw with importScripts, and Vite PWA." href="/offlibrary/workbox/setup/" />
+  <LinkCard title="OfflibraryPlugin in each strategy" description="CacheFirst, CacheOnly, NetworkFirst, NetworkOnly: what changes." href="/offlibrary/workbox/plugin/" />
+  <LinkCard title="Migrating from offlibrarySW()" description="Moving an existing Offlibrary service worker to Workbox." href="/offlibrary/workbox/migration/" />
+  <LinkCard title="Recipe: podcast PWA on Workbox" description="A complete service worker and page, end to end." href="/offlibrary/guides/workbox-podcast/" />
+</CardGrid>
