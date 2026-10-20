@@ -38,6 +38,7 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
       dist_tag: ${{ steps.meta.outputs.dist_tag }}
+      already_published: ${{ steps.meta.outputs.already_published }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -73,8 +74,13 @@ jobs:
           ALREADY=false
           if npm view "$PACKAGE@$VERSION" version --registry "$NPM_REGISTRY" >/dev/null 2>&1; then
             ALREADY=true
-            if [ "$EVENT" = "release" ]; then echo "::error::$PACKAGE@$VERSION is already on npm"; exit 1; fi
-            echo "::warning::$PACKAGE@$VERSION is already on npm (fine for a dry run; bump before releasing)"
+            if [ "$EVENT" = "release" ]; then
+              # e.g. published by hand (RELEASING.md) and the GitHub Release created afterwards for the notes
+              echo "::notice::$PACKAGE@$VERSION is already on npm, so this release publishes nothing"
+              echo "$PACKAGE@$VERSION was already on npm: nothing to publish." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::$PACKAGE@$VERSION is already on npm (fine for a dry run; bump before releasing)"
+            fi
           fi
           {
             echo "version=$VERSION"
@@ -99,7 +105,7 @@ jobs:
   publish:
     name: Publish to npm (needs approval)
     needs: verify
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' && needs.verify.outputs.already_published != 'true'
     runs-on: ubuntu-latest
     environment:
       name: npm
