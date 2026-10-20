@@ -36,7 +36,9 @@ The config is validated when the library is created; problems throw `invalid-con
 | `evict` | `'lru' \| 'none'` | `'lru'` | `'none'` makes limits and quota fail with `limit-exceeded` / `quota-exceeded` instead of evicting. |
 | `retries` | `number` | `3` | Fetch-transport retries on network errors, 5xx, 408 and 429. |
 | `retryDelay` | `number` (ms) | `1000` | Base delay for exponential backoff (with jitter). |
-| `resumable` | `boolean` | `true` | Save partial fetch downloads to IndexedDB so they resume after reloads. |
+| `resumable` | `boolean` | `true` | Keep partial fetch downloads so they resume after reloads: append-only IndexedDB segments (`storage: 'cache'`) or the partial OPFS file itself (`storage: 'opfs'`). |
+| `storage` | `'cache' \| 'opfs'` | `'cache'` | Where finished files live. `'opfs'`: one file per URL in the Origin Private File System, written and resumed in place, 1× disk writes in a dedicated worker. Forces `strategy: 'fetch'`. See [Storage backends](/offlibrary/concepts/storage/#storage-backends-cache-or-opfs). |
+| `onStorageRefused` | `'error' \| 'memory'` | `'error'` | When storage refuses bytes (quota, private browsing, short writes): fail with `quota-exceeded`, or finish in memory without re-fetching (item `storage: 'memory'`). See [When storage says no](/offlibrary/concepts/storage/#when-storage-says-no-quota-and-private-browsing). |
 | `requestInit` | `{ credentials, headers, referrerPolicy, cache }` | `{ credentials: 'same-origin' }` | Extra request options for both transports. |
 | `ui.title` | `(item) => string` | item title | Background Fetch notification title while downloading. |
 | `ui.successTitle` | `(item) => string` | `"<title> is ready offline"` | Notification title after success. |

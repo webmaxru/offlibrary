@@ -365,3 +365,53 @@ describe.runIf(process.env.OFFLIBRARY_E2E_QUOTA)('real private-mode quota (opt-i
     expect(out.item.bytes).toBe(700_000_000);
   }, 300_000);
 });
+
+describe.runIf(process.env.OFFLIBRARY_E2E_HF)('real Hugging Face model (opt-in, 353 MB, network)', () => {
+  // Stemina's fp16 model. HF answers 302 → a signed CDN URL valid for 1 h; the CDN honours Range + If-Range.
+  // X-Linked-Etag on the 302 is the file's SHA-256 (the LFS oid), so it doubles as the integrity value.
+  const URL = 'https://huggingface.co/elicwhite/bs-roformer-sw-6stem-onnx/resolve/main/bs_roformer_sw_6stem_fp16.onnx';
+  const SIZE = 352_778_874;
+  it('downloads in a worker into OPFS, survives a kill at ~100 MB, resumes, verifies SHA-256', async () => {
+    const page = await open();
+    const head = await fetch(URL, { method: 'HEAD', redirect: 'manual' });
+    const hex = (head.headers.get('x-linked-etag') ?? '').replace(/"/g, '');
+    const sri = `sha256-${Buffer.from(hex, 'hex').toString('base64')}`;
+    await page.evaluate(() => (window as any).startWorker());
+    const t0 = Date.now();
+    await page.evaluate(
+      ([config, url, sri, size]) =>
+        (window as any).worker.run(
+          `const lib = ctx.make(arg.config); ctx.state.lib = lib;
+           await lib.collection('models').download({ id: 'stemina-fp16', url: arg.url, integrity: arg.sri, size: arg.size });`,
+          { config, url, sri, size },
+        ),
+      [CONFIG(), URL, sri, SIZE] as const,
+    );
+    for (let i = 0; i < 1200; i++) {
+      const d = await page.evaluate(() => (window as any).worker.run(`return ctx.state.lib.collection('models').peek('stemina-fp16')?.downloaded ?? 0`));
+      if (d > 100_000_000) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    await page.evaluate(() => (window as any).worker.terminate());
+    const killedAt = (Date.now() - t0) / 1000;
+    await page.evaluate(() => (window as any).startWorker());
+    const out = await page.evaluate(
+      ([config]) =>
+        (window as any).worker.run(
+          `const lib = ctx.make(arg.config); await lib.ready;
+           const models = lib.collection('models');
+           const before = models.peek('stemina-fp16');
+           const item = await models.done('stemina-fp16');
+           const t = performance.now();
+           const bytes = await models.bytes('stemina-fp16');
+           return { before, item, readMs: performance.now() - t, len: bytes.byteLength, resumedEvents: ctx.events.filter((e) => e.type === 'progress' && e.resumed).length };`,
+          { config },
+        ),
+      [CONFIG()] as const,
+    );
+    console.log('HF real run:', JSON.stringify({ killedAt, totalS: (Date.now() - t0) / 1000, before: out.before.downloaded, item: out.item, readMs: out.readMs }));
+    expect(out.item).toMatchObject({ status: 'completed', storage: 'opfs', bytes: SIZE, resumed: true });
+    expect(out.len).toBe(SIZE);
+    expect(out.resumedEvents).toBeGreaterThan(0);
+  }, 600_000);
+});

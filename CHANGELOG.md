@@ -4,7 +4,20 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.2.0] - 2026-10-20
 
+0.2.0 was never published to npm before these changes landed, so everything below ships together in the first 0.2.0 on npm.
+
 ### Added
+
+- **Large files and AI models** (the [Stemina case study](https://salnikov.no/offlibrary/guides/ai-models/)):
+  - **`storage: 'opfs'`** collection option: files go to the Origin Private File System (`/offlibrary/<namespace>/<collection>/`), one file per URL plus a `.meta.json` sidecar (URL, ETag, Last-Modified, size, type, integrity). Written once and resumed in place at the byte offset, so there is no second copy while downloading. OPFS collections use the fetch transport; the service worker serves OPFS files too.
+  - **Dedicated-worker support**: the library runs inside a `Worker` with no `window`/`document`/service-worker assumptions. In a dedicated worker OPFS writes go through `createSyncAccessHandle()` (1× disk writes, every write's byte count checked); on a page they fall back to `createWritable({ keepExistingData })`. `capabilities.opfs` and `capabilities.syncAccessHandle` report what is available.
+  - **`onStorageRefused: 'error' | 'memory'`**: detects `QuotaExceededError`, short writes (Chromium's private-mode OPFS returns a short count instead of throwing) and size mismatches after a commit. With `'memory'` the download continues in memory from the same byte without re-fetching; the item completes with `storage: 'memory'` and `storageRefused`, and a new **`storage-refused`** event fires.
+  - **Streaming SHA-256 integrity**: `sha256-` SRI values are hashed chunk by chunk (constant memory, about 130 MB/s), and the hash state is checkpointed with the byte offset, so a resumed download only hashes the new bytes. `sha384`/`sha512` still use WebCrypto on the finished file.
+  - **`collection.bytes(id)`** and **`collection.arrayBuffer(id)`**, the shapes model runtimes take; `match()`/`blob()` work for every storage kind (OPFS returns the disk-backed `File`).
+  - **Richer `progress` events**: `{ item, loaded, total, rate, eta, resumed }`, plus `item.resumed` and `item.storage`.
+- **Multi-tab / multi-worker downloads**: a second context asking for an item that another one is downloading follows its progress (relayed over `BroadcastChannel`) and takes over, resuming from the stored bytes, when the owner goes away (tab closed, worker terminated). Cancelling in one tab stops the download in the tab that owns it.
+- **Resume correctness**: `416` with a matching total finishes the item instead of failing; weak ETags are never sent in `If-Range`; resume state is keyed on the logical URL, so redirects to fresh signed URLs (Hugging Face's one-hour links) don't break it; a stored partial download for a different URL is discarded.
+- `scripts/publish.ps1`: one-command npm release for Windows PowerShell 5.1 / PowerShell 7 (preflight, verify, pack preview, publish with OTP, registry check, tag), every registry call with an explicit `--registry`. See `RELEASING.md`.
 
 - **`offlibrary/workbox`**, a first-class Workbox integration (new subpath export, no runtime dependency on Workbox, works with Workbox 6 and 7):
   - `OfflibraryPlugin`: a Workbox plugin. `cachedResponseWillBeUsed` serves stored files (with `206` for `Range`) inside CacheFirst, CacheOnly and NetworkFirst's cache step; `handlerDidError` makes them the offline fallback for NetworkOnly/NetworkFirst. Compatible with `RangeRequestsPlugin`.
@@ -17,6 +30,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- **Resumable checkpoints are append-only.** Each 4 MiB checkpoint is one new IndexedDB segment record; the part record keeps only metadata. Before, every checkpoint rewrote the whole growing list of Blobs, so a 256 MiB download wrote 8.6 GB to disk (33×) and took 8.8 s; now it writes 513 MB (the segments plus the final `cache.put`) in 1.7 s, and 256 MB in 0.67 s with `storage: 'opfs'` in a worker. The IndexedDB schema moves to version 2; partial downloads from 0.1.x are migrated on first open.
+- Size budgets: the page entry is about 17.5 KB gzip (was about 10.3 KB), the service-worker entries about 5 KB.
 - The service-worker module's routing index and `matchOfflibrary()` moved into a shared internal module used by both `offlibrary/sw` and `offlibrary/workbox`. Behaviour is unchanged; the index now starts loading and listening for updates on first use, too, not only in `offlibrarySW()`.
 
 ## [0.1.0] - 2026-10-18

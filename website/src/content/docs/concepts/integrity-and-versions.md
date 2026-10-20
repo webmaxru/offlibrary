@@ -19,10 +19,31 @@ await models.download({
 
 - `sha256`, `sha384` and `sha512` are supported; several hashes separated by spaces are allowed, as in SRI.
 - For multi-file items, pass an array with one entry per URL (`undefined` to skip one).
-- A mismatch fails the item with `integrity`. Nothing is written to the cache.
-- Both transports verify: the fetch fallback before storing, and the service worker before it stores a Background Fetch result.
+- A mismatch fails the item with `integrity`. Nothing is kept: no cache entry, no OPFS file, no partial download to resume.
+- Both transports verify: the fetch transport while it downloads, and the service worker before it stores a Background Fetch result.
 
-Hashing needs the whole file in memory, so integrity is optional. It's worth it for model weights, map packs and anything your code executes or parses.
+### Streaming SHA-256 (any size, constant memory)
+
+WebCrypto's `crypto.subtle.digest()` only hashes a complete buffer, which would mean holding a 700 MB model in memory just to check it. When the integrity string has a `sha256-` token, the fetch transport hashes **each chunk as it arrives** with a small built-in incremental SHA-256, so memory stays flat whatever the file size.
+
+On resume it doesn't start over either: the hash state (32 bytes plus a tail of under 64 bytes) is saved with every checkpoint, next to the byte offset it belongs to. A resumed download restores that state and only hashes the bytes written after the last checkpoint (for an OPFS file, the tail between the checkpoint and the file's real size), then continues. Nothing already verified is read twice.
+
+Throughput is about 130 MB/s in Chromium (measured: 256 MiB in a worker went from 0.67 s to 2.5 s with integrity on, on a local server). Over a real network the hash keeps up with the download; the Hugging Face test below (353 MB, about 47 MB/s) took 8.4 s in total with verification.
+
+`sha384` and `sha512` tokens fall back to WebCrypto over the finished file, which reads it into memory once. Prefer `sha256` for large files.
+
+### Hugging Face gives you the hash
+
+For files stored with Git LFS or Xet on Hugging Face, the `302` from `/resolve/` carries `X-Linked-Etag`: the file's SHA-256 as hex (the LFS object id). Turn it into an SRI string once, at build time, and pin it in your code:
+
+```js
+// node: build-time helper
+const res = await fetch(url, { method: 'HEAD', redirect: 'manual' });
+const hex = res.headers.get('x-linked-etag').replaceAll('"', '');
+const integrity = `sha256-${Buffer.from(hex, 'hex').toString('base64')}`;
+```
+
+It's worth it for model weights, map packs and anything your code executes or parses: a truncated or tampered file then fails loudly instead of as an opaque parse error later.
 
 ## Versions
 

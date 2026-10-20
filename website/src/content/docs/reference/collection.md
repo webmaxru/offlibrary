@@ -36,7 +36,8 @@ sidebar:
 | `cancel(id)` | `Promise<void>` | Stops a download (including a Background Fetch) and removes the item. |
 | `delete(id)` | `Promise<boolean>` | Removes the item and its stored files. |
 | `clear()` | `Promise<void>` | Deletes every item in the collection. |
-| `match(id, url?)` / `blob(id, url?)` | `Response` / `Blob` | The stored file (the first URL by default). |
+| `match(id, url?)` / `blob(id, url?)` | `Response` / `Blob` | The stored file (the first URL by default), for every storage kind. For `storage: 'opfs'` the Blob is the disk-backed OPFS `File`, not a copy in memory. |
+| `bytes(id, url?)` / `arrayBuffer(id, url?)` | `Uint8Array` / `ArrayBuffer` | The stored file as bytes, the shape model runtimes take (`ort.InferenceSession.create(await models.bytes('m'))`). For items kept in memory it returns the buffer the download filled, without a copy. |
 | `usage()` | `{ count, bytes }` | Completed items and their size. |
 | `sync(items, { prune })` | `(OfflibraryItem \| undefined)[]` | Updates titles and meta from your feed. With `prune: true`, deletes stored items no longer in it (pinned ones are kept). |
 | `touch(id)` | `Promise<OfflibraryItem>` | Marks the item as recently used. The service worker does this when it serves a file. |
