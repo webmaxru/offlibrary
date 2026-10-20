@@ -1,0 +1,152 @@
+# Publishes `offlibrary` to npm when a GitHub Release is published.
+#
+# Auth: npm trusted publishing (OIDC), no NPM_TOKEN needed. One-time setup on npmjs.com:
+# package offlibrary → Settings → Trusted publishing → GitHub Actions: user webmaxru, repository offlibrary,
+# workflow release.yml, environment npm, allowed action "npm publish". Provenance is attached automatically.
+# Fallback: if a repository secret NPM_TOKEN exists, npm uses it only when OIDC is not available.
+#
+# Gate: the publish job runs in the `npm` environment, so its required reviewer approves it in the Actions UI.
+# Full setup and the release routine: docs/PUBLISHING-CI.md.
+# The browser e2e suites run in ci.yml on main: release from a main commit whose CI is green.
+name: Release to npm
+
+on:
+  release:
+    types: [published]
+  # Manual dry run from the Actions tab: verifies and packs, never publishes.
+  workflow_dispatch:
+  # A PR that changes this file runs the same dry run.
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NPM_REGISTRY: https://registry.npmjs.org
+  PACKAGE: offlibrary
+
+jobs:
+  verify:
+    name: Verify (version, tests, build, pack)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      dist_tag: ${{ steps.meta.outputs.dist_tag }}
+      already_published: ${{ steps.meta.outputs.already_published }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # needed for the "tag is on main" check
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22' # same as ci.yml
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false # no dependency cache in release builds
+
+      - name: Version, tag and dist-tag checks
+        id: meta
+        env:
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          NAME=$(node -p "require('./package.json').name")
+          LOCK_VERSION=$(node -p "require('./package-lock.json').version")
+          [ "$NAME" = "$PACKAGE" ] || { echo "::error::package.json name is $NAME, expected $PACKAGE"; exit 1; }
+          [ "$LOCK_VERSION" = "$VERSION" ] || echo "::warning::package-lock.json says $LOCK_VERSION, package.json says $VERSION (npm version keeps both in sync)"
+          # Prerelease versions (1.2.0-beta.1) or a release marked "pre-release" go to "next", the rest to "latest".
+          if [[ "$VERSION" == *-* || "${PRERELEASE:-false}" == "true" ]]; then DIST_TAG=next; else DIST_TAG=latest; fi
+          if [ "$EVENT" = "release" ]; then
+            [ "$TAG" = "v$VERSION" ] || { echo "::error::release tag $TAG does not match package.json version v$VERSION"; exit 1; }
+            git fetch --no-tags origin main
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::tag $TAG points at a commit that is not on main"; exit 1; }
+          fi
+          ALREADY=false
+          if npm view "$PACKAGE@$VERSION" version --registry "$NPM_REGISTRY" >/dev/null 2>&1; then
+            ALREADY=true
+            if [ "$EVENT" = "release" ]; then
+              # e.g. published by hand (RELEASING.md) and the GitHub Release created afterwards for the notes
+              echo "::notice::$PACKAGE@$VERSION is already on npm, so this release publishes nothing"
+              echo "$PACKAGE@$VERSION was already on npm: nothing to publish." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::$PACKAGE@$VERSION is already on npm (fine for a dry run; bump before releasing)"
+            fi
+          fi
+          {
+            echo "version=$VERSION"
+            echo "dist_tag=$DIST_TAG"
+            echo "already_published=$ALREADY"
+          } >> "$GITHUB_OUTPUT"
+          echo "### $PACKAGE@$VERSION → dist-tag \`$DIST_TAG\` ($EVENT)" >> "$GITHUB_STEP_SUMMARY"
+
+      - run: npm ci --registry "$NPM_REGISTRY"
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run size
+      - run: npm pack --dry-run --registry "$NPM_REGISTRY"
+      - run: node scripts/check-package.mjs
+
+      - name: Dry-run publish (shows exactly what would be uploaded)
+        # npm refuses even a dry run for a version that is already on the registry.
+        if: steps.meta.outputs.already_published != 'true'
+        run: npm publish --dry-run --ignore-scripts --access public --tag "${{ steps.meta.outputs.dist_tag }}" --registry "$NPM_REGISTRY"
+
+  publish:
+    name: Publish to npm (needs approval)
+    needs: verify
+    if: github.event_name == 'release' && needs.verify.outputs.already_published != 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/offlibrary/v/${{ needs.verify.outputs.version }}
+    permissions:
+      contents: read
+      id-token: write # OIDC token for npm trusted publishing and provenance
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24' # bundles npm 11 (trusted publishing needs npm >= 11.5.1)
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Check npm supports trusted publishing (>= 11.5.1)
+        run: |
+          npm --version
+          node -e "const v=require('child_process').execSync('npm --version').toString().trim().split('.').map(Number); if (v[0]<11||(v[0]===11&&(v[1]<5||(v[1]===5&&v[2]<1)))) { console.error('npm '+v.join('.')+' is too old for trusted publishing'); process.exit(1) }"
+
+      - run: npm ci --registry "$NPM_REGISTRY"
+      - run: npm run build
+
+      # Tests already passed in the verify job; --ignore-scripts skips the prepublishOnly re-run.
+      - name: npm publish (trusted publishing + provenance)
+        env:
+          # Empty unless you add the fallback secret; npm tries OIDC first either way.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --ignore-scripts --provenance --access public --tag "${{ needs.verify.outputs.dist_tag }}" --registry "$NPM_REGISTRY"
+
+      - name: Confirm on the registry
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          for i in 1 2 3 4 5 6 7; do
+            if npm view "$PACKAGE@$VERSION" version --registry "$NPM_REGISTRY"; then break; fi
+            if [ "$i" = 7 ]; then echo "::error::$PACKAGE@$VERSION not visible on npm after 60 s"; exit 1; fi
+            sleep 10
+          done
+          npm view "$PACKAGE" dist-tags --registry "$NPM_REGISTRY"
+          echo "Published https://www.npmjs.com/package/$PACKAGE/v/$VERSION" >> "$GITHUB_STEP_SUMMARY"
