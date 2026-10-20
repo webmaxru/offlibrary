@@ -3,14 +3,16 @@ import { build } from 'esbuild';
 import { brotliCompressSync, gzipSync } from 'node:zlib';
 
 const budgets = [
-  { name: 'offlibrary (page)', entry: 'src/index.ts', gzip: 11 * 1024 },
-  { name: 'offlibrary/sw', entry: 'src/sw.ts', gzip: 4.5 * 1024 },
-  { name: 'offlibrary/workbox', entry: 'src/workbox.ts', gzip: 4.5 * 1024 },
+  // 0.2.0 grew the page entry from ~10.3 KB to ~17.5 KB gzip: OPFS backend + worker fast path, append-only
+  // checkpoints, streaming SHA-256, storage-refusal fallback, multi-tab takeover and runtime helpers.
+  { name: 'offlibrary (page)', entry: 'src/index.ts', gzip: 18 * 1024 },
+  { name: 'offlibrary/sw', entry: 'src/sw.ts', gzip: 5 * 1024 },
+  { name: 'offlibrary/workbox', entry: 'src/workbox.ts', gzip: 5.25 * 1024 },
   // What a Workbox SW pays for the common case alone (tree-shaken): match + handler, no Background Fetch handling.
   {
     name: 'workbox route only',
     stdin: "import { offlibraryMatch, offlibraryHandler } from './src/workbox.ts'; self.r = [offlibraryMatch, offlibraryHandler()];",
-    gzip: 2 * 1024,
+    gzip: 2.6 * 1024,
   },
 ];
 let failed = false;

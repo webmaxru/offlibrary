@@ -165,18 +165,50 @@ export class Collection<M = unknown> {
     return this.#lib._touch(this.#key(id)) as Promise<OfflibraryItem<M>>;
   }
 
-  /** The stored response for one of the item's files (default: the first), or `undefined`. */
+  /**
+   * The stored response for one of the item's files (default: the first), or `undefined`.
+   * Works for every storage kind (`cache`, `opfs`, `memory`).
+   */
   async match(id: string, url?: string): Promise<Response | undefined> {
     const item = await this.get(id);
     if (!item || item.status !== 'completed') return undefined;
     const target = url ? absoluteUrl(url) : item.urls[0]!;
-    const cache = await caches.open(this.#lib._peek(item.key)!.cacheName);
-    return cache.match(target);
+    return this.#lib._match(item.key, target);
   }
 
-  /** The stored file as a Blob (default: the first file), or `undefined`. */
+  /** The stored file as a Blob (default: the first file), or `undefined`. For OPFS this is a disk-backed `File`. */
   async blob(id: string, url?: string): Promise<Blob | undefined> {
-    return (await this.match(id, url))?.blob();
+    const item = await this.get(id);
+    if (!item || item.status !== 'completed') return undefined;
+    const target = url ? absoluteUrl(url) : item.urls[0]!;
+    const data = await this.#lib._read(item.key, target);
+    if (!data) return undefined;
+    return data instanceof Blob ? data : new Blob([data as BlobPart]);
+  }
+
+  /** The stored file as an `ArrayBuffer` (default: the first file), or `undefined`. */
+  async arrayBuffer(id: string, url?: string): Promise<ArrayBuffer | undefined> {
+    const bytes = await this.bytes(id, url);
+    if (!bytes) return undefined;
+    return bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+      ? (bytes.buffer as ArrayBuffer)
+      : (bytes.slice().buffer as ArrayBuffer);
+  }
+
+  /**
+   * The stored file as a `Uint8Array` (default: the first file), or `undefined`. This is the shape
+   * model runtimes take: `ort.InferenceSession.create(await models.bytes('encoder'))`.
+   *
+   * For items kept in memory (`storage: 'memory'`) this returns the buffer the download filled, without a
+   * copy. Treat it as read-only.
+   */
+  async bytes(id: string, url?: string): Promise<Uint8Array | undefined> {
+    const item = await this.get(id);
+    if (!item || item.status !== 'completed') return undefined;
+    const target = url ? absoluteUrl(url) : item.urls[0]!;
+    const data = await this.#lib._read(item.key, target);
+    if (!data) return undefined;
+    return data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : data;
   }
 
   /** Completed items and their bytes. */

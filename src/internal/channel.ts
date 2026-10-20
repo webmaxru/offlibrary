@@ -4,7 +4,7 @@ import type { StoredItem } from '../types.js';
 export const CHANNEL_NAME = 'offlibrary';
 
 /** What happened to an item. */
-export type UpdateKind = 'change' | 'complete' | 'fail' | 'abort' | 'delete' | 'evict' | 'click';
+export type UpdateKind = 'change' | 'progress' | 'complete' | 'fail' | 'abort' | 'delete' | 'evict' | 'click';
 
 /** @internal Message format on the channel. */
 export interface ChannelMessage {
@@ -16,6 +16,10 @@ export interface ChannelMessage {
   item?: StoredItem;
   /** Evict reason. */
   reason?: string;
+  /** Live progress from the context that owns a download (`kind: 'progress'`). */
+  downloaded?: number;
+  total?: number;
+  rate?: number;
 }
 
 /** @internal */

@@ -46,14 +46,15 @@ audio.src = 'https://cdn.example.com/ep-42.mp3'; // served from the device, seek
 
 - 🧾 **Configuration-first.** You describe *collections* (episodes, lessons, tiles…) and their policies once.
 - 🛰️ **Background Fetch when available.** Downloads keep going after the tab or browser closes, with the browser's own progress notification. Offlibrary uses deterministic IDs and **re-attaches after reloads**.
-- 🔁 **Resumable fallback everywhere else.** Streaming `fetch` with live progress, pause/resume, cancel and retries with backoff. Partial data is saved to IndexedDB, and downloads **resume with `Range` requests**, even after a reload.
+- 🔁 **Resumable fallback everywhere else.** Streaming `fetch` with live progress (bytes, rate, ETA), pause/resume, cancel and retries with backoff. Checkpoints are append-only, and downloads **resume exactly with `Range` + `If-Range`**, even after a reload and through redirects to short-lived signed URLs.
+- 🧠 **Built for large AI models.** `storage: 'opfs'` writes straight into the Origin Private File System and resumes in place; in a dedicated worker it uses `createSyncAccessHandle()` (1× disk writes). When a private window's storage refuses bytes (quota errors or silent short writes), `onStorageRefused: 'memory'` finishes the download in memory so the model still runs. `collection.bytes(id)` hands the file to onnxruntime-web.
 - 🎧 **Offline media that seeks.** The service-worker module answers `Range` requests with `206 Partial Content` straight from the cache.
 - 📦 **Storage management.** Quota pre-check, `navigator.storage.persist()`, per-collection `maxItems` / `maxBytes` with LRU eviction, and pinned items.
 - 🧩 **Multi-file items.** A video + subtitles + thumbnail, or a map-tile pack, is one item with one progress bar.
-- 🔐 **Integrity and versions.** SRI hashes (`sha256/384/512`) are checked before anything is stored, and a new `version` replaces the old copy.
-- 🔔 **Typed events and `subscribe()`.** Shaped for `useSyncExternalStore`, signals or any store. Every tab and the service worker share one state.
+- 🔐 **Integrity and versions.** SRI hashes (`sha256/384/512`) are checked before anything is kept; `sha256` is hashed while streaming (constant memory, survives resumes). A new `version` replaces the old copy.
+- 🔔 **Typed events and `subscribe()`.** Shaped for `useSyncExternalStore`, signals or any store. Every tab, worker and the service worker share one state; a second tab follows a running download and takes over if the first one closes.
 - 🧰 **First-class Workbox plugin.** `offlibrary/workbox` brings stored files into your Workbox routes and strategies.
-- 🪶 **Small and dependency-free.** Written in TypeScript, ESM, tree-shakeable, about 10 KB gzipped on the page and about 4 KB in the service worker.
+- 🪶 **Dependency-free.** Written in TypeScript, ESM, tree-shakeable, about 17.5 KB gzipped on the page and about 5 KB in the service worker. Runs on pages, in dedicated workers and in service workers.
 
 ## Browser support
 
@@ -145,7 +146,7 @@ download(item) ─▶ validate → size → quota/limits  │            │ off
 ```
 
 - **Metadata** (status, progress, sizes, errors, timestamps) lives in IndexedDB (`offlibrary` database), shared by every tab and the service worker. Changes are announced on a `BroadcastChannel`.
-- **Files** live in the Cache API, one cache per collection (`offlibrary:<namespace>:<collection>`), keyed by their **original URL**.
+- **Files** live in the Cache API, one cache per collection (`offlibrary:<namespace>:<collection>`), keyed by their **original URL**; or, with `storage: 'opfs'`, in OPFS files under `/offlibrary/<namespace>/<collection>/`.
 - **Strategy** (`auto`): Background Fetch if the browser supports it and the item is ≥ `backgroundFetchThreshold` (default 5 MiB) or of unknown size. Otherwise streaming fetch. If Background Fetch refuses to start, for example because no service worker is active, Offlibrary falls back to fetch.
 - **Item lifecycle:** `downloading → completed`, with side exits to `paused` (fetch only) and `failed` (`retry()` returns to `downloading`). `cancel()`, `delete()` and eviction remove the item.
 
@@ -156,7 +157,7 @@ Everything else lives on the docs site, **[salnikov.no/offlibrary](https://salni
 | | |
 |---|---|
 | **Concepts** | [Collections](https://salnikov.no/offlibrary/concepts/collections/) · [Strategies](https://salnikov.no/offlibrary/concepts/strategies/) · [Items and multi-file items](https://salnikov.no/offlibrary/concepts/items/) · [Storage, quota, eviction](https://salnikov.no/offlibrary/concepts/storage/) · [Offline playback with Range](https://salnikov.no/offlibrary/concepts/offline-playback/) · [Events](https://salnikov.no/offlibrary/concepts/events/) · [Integrity and versions](https://salnikov.no/offlibrary/concepts/integrity-and-versions/) · [Syncing with a feed](https://salnikov.no/offlibrary/concepts/sync/) |
-| **Guides** | [Podcast app](https://salnikov.no/offlibrary/guides/podcast/) · [Video course](https://salnikov.no/offlibrary/guides/video-course/) · [Map tiles](https://salnikov.no/offlibrary/guides/map-tiles/) · [AI models](https://salnikov.no/offlibrary/guides/ai-models/) · [Podcast PWA on Workbox](https://salnikov.no/offlibrary/guides/workbox-podcast/) |
+| **Guides** | [Podcast app](https://salnikov.no/offlibrary/guides/podcast/) · [Video course](https://salnikov.no/offlibrary/guides/video-course/) · [Map tiles](https://salnikov.no/offlibrary/guides/map-tiles/) · [Large AI model files (Stemina case study)](https://salnikov.no/offlibrary/guides/ai-models/) · [Podcast PWA on Workbox](https://salnikov.no/offlibrary/guides/workbox-podcast/) |
 | **Reference** | [Configuration](https://salnikov.no/offlibrary/reference/configuration/) · [Library and collection methods](https://salnikov.no/offlibrary/reference/collection/) · [Errors](https://salnikov.no/offlibrary/reference/errors/) · [Service worker exports](https://salnikov.no/offlibrary/reference/service-worker/) · [API (generated)](https://salnikov.no/offlibrary/api/readme/) |
 | **Project** | [FAQ](https://salnikov.no/offlibrary/faq/) · [Changelog](CHANGELOG.md) · [Contributing](https://salnikov.no/offlibrary/contributing/) |
 
@@ -164,7 +165,7 @@ Everything else lives on the docs site, **[salnikov.no/offlibrary](https://salni
 
 | Import | Main exports |
 |---|---|
-| `offlibrary` | `createOfflibrary(config)` → `library.collection(name)` with `download`, `done`, `pause`, `resume`, `retry`, `cancel`, `delete`, `match`, `blob`, `sync`, `subscribe`, `snapshot`; `library.on(event)`, `library.storage`; `OfflibraryError`, `formatBytes`, `isBackgroundFetchSupported` |
+| `offlibrary` | `createOfflibrary(config)` → `library.collection(name)` with `download`, `done`, `pause`, `resume`, `retry`, `cancel`, `delete`, `match`, `blob`, `bytes`, `arrayBuffer`, `sync`, `subscribe`, `snapshot`; `library.on(event)`, `library.storage`; `OfflibraryError`, `formatBytes`, `isBackgroundFetchSupported` |
 | `offlibrary/sw` | `offlibrarySW(options)`, `matchOfflibrary(request)`, `isOfflibraryRequest(request)`, `handleBackgroundFetchEvent`, `createRangeResponse`, `parseRange`, `verifyIntegrity` |
 | `offlibrary/workbox` | `OfflibraryPlugin`, `offlibraryMatch`, `offlibraryHandler({ fallback })`, `initOfflibrary(options)` |
 
@@ -225,6 +226,29 @@ await episodes.sync(feed.items.map(({ guid, title }) => ({ id: guid, title })), 
 
 More in the [guides](https://salnikov.no/offlibrary/guides/podcast/).
 
+## Large AI model files in a worker
+
+The [Stemina case study](https://salnikov.no/offlibrary/guides/ai-models/): a 353–701 MB ONNX model from Hugging Face, downloaded in the worker that runs it, written once into OPFS, resumed exactly through Hugging Face's one-hour signed redirects, kept usable in private windows, verified, and handed to onnxruntime-web.
+
+```js
+// engine.worker.js
+import { createOfflibrary } from 'offlibrary';
+import * as ort from 'onnxruntime-web';
+
+const library = createOfflibrary({
+  serviceWorker: false,
+  collections: { models: { storage: 'opfs', onStorageRefused: 'memory' } },
+});
+const models = library.collection('models');
+library.on('progress', ({ loaded, total, rate, eta, resumed }) => postMessage({ loaded, total, rate, eta, resumed }));
+
+await models.download({ id: 'fp16', url: 'https://huggingface.co/…/model_fp16.onnx', size: 352_778_874, integrity: 'sha256-…', pinned: true });
+await models.done('fp16');
+const session = await ort.InferenceSession.create(await models.bytes('fp16'));
+```
+
+256 MiB in headless Chromium: 0.67 s and 256 MB written to disk in a worker, the same as hand-written `createSyncAccessHandle()` code (0.77 s, 256 MB). More: [Storage backends](https://salnikov.no/offlibrary/concepts/storage/#storage-backends-cache-or-opfs), [workers](https://salnikov.no/offlibrary/concepts/storage/#running-in-a-dedicated-worker), [quota and private browsing](https://salnikov.no/offlibrary/concepts/storage/#when-storage-says-no-quota-and-private-browsing), [streaming integrity](https://salnikov.no/offlibrary/concepts/integrity-and-versions/#streaming-sha-256-any-size-constant-memory).
+
 ## Demo
 
 [**salnikov.no/offlibrary/demo**](https://salnikov.no/offlibrary/demo/) is **Offlibrary Radio**, a podcast PWA with nine public-domain short stories from [LibriVox](https://librivox.org/short-story-collection-006/), served by the Internet Archive: both transports side by side, pause/resume, cancel and delete, a storage meter, offline playback with seeking, and installability. Source: [`demo/`](demo/); run it locally with `npm run demo`.
@@ -244,7 +268,7 @@ npm run check:package  # pack + install + type-check as a consumer would
 npm run demo           # http://127.0.0.1:5173
 ```
 
-The docs site is in [`website/`](website/) (Astro + Starlight): `npm run demo:build`, then `cd website && npm install && npm run dev`. More in [Contributing](https://salnikov.no/offlibrary/contributing/). Design notes: [docs/ANALYSIS.md](docs/ANALYSIS.md). Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md). Releasing: [RELEASING.md](RELEASING.md).
+The docs site is in [`website/`](website/) (Astro + Starlight): `npm run demo:build`, then `cd website && npm install && npm run dev`. More in [Contributing](https://salnikov.no/offlibrary/contributing/). Design notes: [docs/ANALYSIS.md](docs/ANALYSIS.md). Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md). Releasing: [RELEASING.md](RELEASING.md), or in one command on Windows: `powershell -ExecutionPolicy Bypass -File .\scripts\publish.ps1` (add `-DryRun` to try it).
 
 ## License
 

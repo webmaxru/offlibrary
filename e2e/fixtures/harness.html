@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>offlibrary harness</title></head>
+<body>
+<script type="module">
+  // A generic page for e2e tests: tests call window.run(code) / window.worker.run(code).
+  import * as offlibrary from '/dist/offlibrary.min.js';
+  window.offlibrary = offlibrary;
+  window.events = [];
+  window.make = (config) => {
+    const lib = offlibrary.createOfflibrary(config);
+    for (const type of ['progress', 'complete', 'error', 'abort', 'delete', 'evict', 'storage-refused']) {
+      lib.on(type, (d) => window.events.push({ type, id: d.item.id, status: d.item.status, storage: d.item.storage, downloaded: d.item.downloaded, total: d.item.total, resumed: d.resumed ?? d.item.resumed, rate: d.rate, eta: d.eta, reason: d.reason, code: d.error?.code }));
+    }
+    return lib;
+  };
+  window.sha256 = async (bytes) => btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))));
+  window.startWorker = () => {
+    const w = new Worker('/e2e/fixtures/worker.js', { type: 'module' });
+    let seq = 0;
+    const pending = new Map();
+    w.onmessage = (e) => {
+      const p = pending.get(e.data.id);
+      if (!p) return;
+      pending.delete(e.data.id);
+      e.data.error ? p.reject(new Error(e.data.error)) : p.resolve(e.data.value);
+    };
+    w.onerror = (e) => console.error('[worker error]', e.message);
+    window.worker = {
+      run: (code, arg) => new Promise((resolve, reject) => {
+        const id = ++seq;
+        pending.set(id, { resolve, reject });
+        w.postMessage({ id, code, arg });
+      }),
+      terminate: () => w.terminate(),
+    };
+    return true;
+  };
+  window.ready = true;
+</script>
+</body>
+</html>

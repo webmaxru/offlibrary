@@ -4,11 +4,13 @@ import { OfflibraryError, serializeError, toOfflibraryError } from '../errors.js
 import { broadcast, isChannelMessage, openChannel } from '../internal/channel.js';
 import type { ChannelMessage, UpdateKind } from '../internal/channel.js';
 import { bgFetchIdOf, cacheNameOf, itemKey, scopeOf } from '../internal/ids.js';
+import { collectionDir, fileNameOf, fileOf, isDedicatedWorker, metaNameOf, opfsAvailable, readMeta, removeEntry } from '../internal/opfs.js';
 import { store } from '../internal/store.js';
 import { absoluteUrl, now } from '../internal/util.js';
 import { toPublicItem } from '../types.js';
 import type { ItemInput, OfflibraryItem, StoredItem } from '../types.js';
 import { runFetchDownload } from './fetch-transport.js';
+import type { FetchResult } from './fetch-transport.js';
 import { Collection } from './collection.js';
 
 /** Why an item was evicted. */
@@ -19,7 +21,25 @@ export interface OfflibraryEventMap {
   /** Anything changed (fires after every other event, and for status changes without one). */
   change: { item: OfflibraryItem; type: 'start' | 'progress' | 'pause' | 'resume' | 'update' | Exclude<keyof OfflibraryEventMap, 'change'> };
   /** Bytes arrived (throttled by `progressInterval`). */
-  progress: { item: OfflibraryItem };
+  progress: {
+    item: OfflibraryItem;
+    /** Bytes received so far (same as `item.downloaded`). */
+    loaded: number;
+    /** Expected total bytes, `0` when unknown. */
+    total: number;
+    /** Smoothed download rate in bytes per second, `null` until measurable. */
+    rate: number | null;
+    /** Estimated seconds remaining, `null` when the rate or total is unknown. */
+    eta: number | null;
+    /** `true` when this attempt continued from bytes stored earlier. */
+    resumed: boolean;
+  };
+  /**
+   * Storage refused the bytes (quota, private browsing, short writes) and the collection's
+   * `onStorageRefused: 'memory'` moved the download to memory. It continues without re-fetching;
+   * the item completes with `storage: 'memory'`.
+   */
+  'storage-refused': { item: OfflibraryItem; reason: string; error: OfflibraryError };
   /** The item is fully stored and available offline. */
   complete: { item: OfflibraryItem };
   /** The download failed. `item.status` is `'failed'`; call `retry()` to try again. */
@@ -46,6 +66,10 @@ export interface OfflibraryCapabilities {
   storageEstimate: boolean;
   storagePersist: boolean;
   webLocks: boolean;
+  /** Origin Private File System (`storage: 'opfs'`). */
+  opfs: boolean;
+  /** Running in a dedicated worker, where OPFS writes use the fast `createSyncAccessHandle()` path. */
+  syncAccessHandle: boolean;
 }
 
 /** Storage numbers from `navigator.storage.estimate()`. */
@@ -79,6 +103,15 @@ interface ActiveDownload {
   run?: Promise<void>;
   intent?: 'pause' | 'cancel';
   detach?: () => void;
+  /** Another context holds the download's lock; this one follows and takes over if it goes away. */
+  waiting?: boolean;
+}
+
+/** Wait for a Web Lock (no `ifAvailable`), abortable. Resolves with `fn`'s result. */
+async function waitForLock<T>(name: string, signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+  const locks = nav()?.locks;
+  if (!locks) return fn();
+  return locks.request(name, { signal }, fn) as Promise<T>;
 }
 
 const nav = (): Navigator | undefined => (typeof navigator === 'undefined' ? undefined : navigator);
@@ -127,6 +160,13 @@ export class Offlibrary extends EventTarget {
   readonly #active = new Map<string, ActiveDownload>();
   readonly #lastProgress = new Map<string, number>();
   readonly #starting = new Map<string, Promise<OfflibraryItem>>();
+  /** Bytes kept in memory after storage refused them: item key → URL → data. */
+  readonly #memory = new Map<string, Map<string, Uint8Array | Blob>>();
+  /** Live rate measurement per downloading item. */
+  readonly #rates = new Map<string, { t: number; bytes: number; rate: number | null; resumed: boolean }>();
+  readonly #lastBroadcast = new Map<string, number>();
+  /** Items whose quota pre-check failed under `onStorageRefused: 'memory'`. */
+  readonly #memoryOnly = new Set<string>();
   #channel: BroadcastChannel | undefined;
   #registration: Promise<ServiceWorkerRegistration | undefined> | undefined;
   #persistAsked = false;
@@ -148,6 +188,8 @@ export class Offlibrary extends EventTarget {
       storageEstimate: !!n?.storage?.estimate,
       storagePersist: !!n?.storage?.persist,
       webLocks: !!n?.locks,
+      opfs: opfsAvailable(),
+      syncAccessHandle: opfsAvailable() && isDedicatedWorker() && typeof g.FileSystemSyncAccessHandle === 'function',
     };
     this.storage = {
       estimate: async () => {
@@ -325,7 +367,11 @@ export class Offlibrary extends EventTarget {
     const sameContent = existing && existing.version === input.version && existing.urls.join('\n') === urls.join('\n');
     if (existing && sameContent) {
       if (existing.status === 'completed') return this._touch(key);
-      if (existing.status === 'downloading') return toPublicItem(existing);
+      if (existing.status === 'downloading') {
+        // Started in another tab/worker (or before a reload): follow it, and take over if it stops.
+        if (existing.strategy === 'fetch' && !this.#active.has(key)) this.#runFetch(existing);
+        return toPublicItem(existing);
+      }
       return this._resume(key);
     }
     if (existing?.status === 'downloading') await this._cancel(key, true);
@@ -336,7 +382,21 @@ export class Offlibrary extends EventTarget {
     const wantsBg = cfg.strategy !== 'fetch' && (cfg.strategy === 'background-fetch' || size === 0 || size >= cfg.backgroundFetchThreshold);
     const manager = wantsBg ? await this.#manager() : undefined;
 
-    await this.#makeRoom(collection, cfg, size, key);
+    let memoryOnly = false;
+    if (cfg.storage === 'opfs' && !opfsAvailable()) {
+      if (cfg.onStorageRefused !== 'memory') {
+        throw new OfflibraryError('not-supported', 'This browser has no Origin Private File System (storage: "opfs").');
+      }
+      memoryOnly = true;
+    }
+    try {
+      await this.#makeRoom(collection, cfg, size, key);
+    } catch (err) {
+      if (cfg.onStorageRefused !== 'memory' || (err as OfflibraryError).code !== 'quota-exceeded') throw err;
+      memoryOnly = true; // the quota pre-check says it won't fit: don't even try storage
+    }
+    if (memoryOnly) this.#memoryOnly.add(key);
+    else this.#memoryOnly.delete(key);
     if (this.#config.persist === 'on-download') this.#askPersist();
 
     const descriptor: ItemDescriptor = { id: input.id, urls };
@@ -363,6 +423,8 @@ export class Offlibrary extends EventTarget {
       createdAt: existing?.createdAt ?? now(),
       updatedAt: now(),
       cacheName: cacheNameOf(this.namespace, collection),
+      storage: cfg.storage,
+      ...(cfg.storage === 'opfs' ? { files: urls.map((_, i) => fileNameOf(input.id, i)) } : {}),
       ui: {
         title: cfg.ui?.title?.(descriptor) ?? label,
         successTitle: cfg.ui?.successTitle?.(descriptor) ?? `${label} is ready offline`,
@@ -459,59 +521,125 @@ export class Offlibrary extends EventTarget {
     const entry: ActiveDownload = { controller };
     this.#active.get(key)?.detach?.();
     this.#active.set(key, entry);
-    entry.run = (async () => {
-      const outcome = await withLock(`offlibrary:${key}`, async () => {
-        try {
-          const job: Parameters<typeof runFetchDownload>[0] = {
-            key,
-            urls: rec.urls,
-            cacheName: rec.cacheName,
-            resumable: cfg.resumable,
-            retries: cfg.retries,
-            retryDelay: cfg.retryDelay,
-            signal: controller.signal,
-            total: rec.total,
-            onProgress: (downloaded, total) => {
-              const live = this.#items.get(key);
-              if (!live || live.status !== 'downloading') return;
-              live.downloaded = downloaded;
-              if (total) live.total = total;
-              this.#progress(live);
-            },
-          };
-          if (rec.integrity) job.integrity = rec.integrity;
-          if (cfg.requestInit) job.requestInit = cfg.requestInit;
-          const { bytes } = await runFetchDownload(job);
-          await this.#complete(key, bytes);
-        } catch (err) {
-          if (entry.intent === 'pause') {
-            const r = await this._patch(key, (x) => {
-              x.status = 'paused';
-            });
-            if (r) this._emit('change', { item: toPublicItem(r), type: 'pause' });
-          } else if (entry.intent !== 'cancel') {
-            await this.#fail(key, err);
-          }
+    const lockName = `offlibrary:${key}`;
+    const body = async (current: StoredItem) => {
+      try {
+        this.#rates.delete(key);
+        const job: Parameters<typeof runFetchDownload>[0] = {
+          key,
+          urls: current.urls,
+          cacheName: current.cacheName,
+          storage: current.storage === 'opfs' ? 'opfs' : 'cache',
+          onStorageRefused: cfg.onStorageRefused,
+          resumable: cfg.resumable,
+          retries: cfg.retries,
+          retryDelay: cfg.retryDelay,
+          signal: controller.signal,
+          total: current.total,
+          onProgress: (downloaded, total, info) => {
+            const live = this.#items.get(key);
+            if (!live || live.status !== 'downloading') return;
+            live.downloaded = downloaded;
+            if (total) live.total = total;
+            if (info?.resumed) live.resumed = true;
+            this.#measureRate(key, downloaded, !!info?.resumed);
+            this.#progress(live);
+          },
+          onStorageRefusedFallback: (reason, error) => {
+            const live = this.#items.get(key);
+            if (!live) return;
+            live.storageRefused = reason;
+            this._emit('storage-refused', { item: toPublicItem(live), reason, error });
+          },
+        };
+        if (current.storage === 'opfs') {
+          job.opfs = { namespace: this.namespace, collection: current.collection, files: current.files ?? current.urls.map((_, i) => fileNameOf(current.id, i)) };
         }
-      });
+        if (this.#memoryOnly.has(key)) job.memoryOnly = true;
+        if (current.integrity) job.integrity = current.integrity;
+        if (cfg.requestInit) job.requestInit = cfg.requestInit;
+        const result = await runFetchDownload(job);
+        await this.#complete(key, result.bytes, result);
+      } catch (err) {
+        if (entry.intent === 'pause') {
+          const r = await this._patch(key, (x) => {
+            x.status = 'paused';
+          });
+          if (r) this._emit('change', { item: toPublicItem(r), type: 'pause' });
+        } else if (entry.intent !== 'cancel') {
+          await this.#fail(key, err);
+        }
+      } finally {
+        this.#rates.delete(key);
+      }
+    };
+    entry.run = (async () => {
+      const outcome = await withLock(lockName, () => body(rec));
       if (outcome === 'busy') {
-        // Another tab is downloading this item; it will broadcast the result.
+        // Another tab or worker is downloading this item. Follow its progress (BroadcastChannel) and
+        // wait for its lock: if it finishes, there is nothing to do; if it goes away mid-download
+        // (tab closed, worker terminated), take over and resume from what it stored.
+        entry.waiting = true;
+        entry.detach = () => controller.abort(new DOMException('Detached', 'AbortError'));
+        await waitForLock(lockName, controller.signal, async () => {
+          entry.waiting = false;
+          const fresh = await store.getItem(key);
+          if (!fresh) return;
+          if (fresh.status !== 'downloading') {
+            const prev = this.#items.get(key);
+            this._set(fresh);
+            if (prev?.status !== fresh.status) {
+              if (fresh.status === 'completed') this._emit('complete', { item: toPublicItem(fresh) });
+              else if (fresh.status === 'failed') this._emit('error', { item: toPublicItem(fresh), error: this.#errorOf(fresh) });
+            }
+            return;
+          }
+          this._set({ ...fresh, downloaded: Math.max(fresh.downloaded, this.#items.get(key)?.downloaded ?? 0) });
+          await body(fresh);
+        }).catch(() => undefined);
       }
       if (this.#active.get(key) === entry) this.#active.delete(key);
     })();
   }
 
-  #progress(rec: StoredItem): void {
+  #measureRate(key: string, bytes: number, resumed: boolean): void {
+    const t = now();
+    const prev = this.#rates.get(key);
+    if (!prev) {
+      this.#rates.set(key, { t, bytes, rate: null, resumed });
+      return;
+    }
+    if (resumed) prev.resumed = true;
+    const dt = (t - prev.t) / 1000;
+    if (dt < 0.25) return;
+    const instant = (bytes - prev.bytes) / dt;
+    prev.rate = prev.rate === null ? instant : prev.rate + 0.3 * (instant - prev.rate);
+    prev.t = t;
+    prev.bytes = bytes;
+  }
+
+  #progress(rec: StoredItem, fromOtherContext = false): void {
     const t = now();
     const last = this.#lastProgress.get(rec.key) ?? 0;
     const final = rec.total > 0 && rec.downloaded >= rec.total;
     if (!final && t - last < this.#config.progressInterval) return;
     this.#lastProgress.set(rec.key, t);
     this.#snapshots.delete(rec.collection);
-    this._emit('progress', { item: toPublicItem(rec) });
+    const r = this.#rates.get(rec.key);
+    const rate = r?.rate ?? null;
+    const eta = rate && rate > 0 && rec.total > 0 ? Math.max(0, (rec.total - rec.downloaded) / rate) : null;
+    this._emit('progress', { item: toPublicItem(rec), loaded: rec.downloaded, total: rec.total, rate, eta, resumed: !!(r?.resumed || rec.resumed) });
+    if (!fromOtherContext && t - (this.#lastBroadcast.get(rec.key) ?? 0) >= 250) {
+      // Let other tabs following this download show live progress.
+      this.#lastBroadcast.set(rec.key, t);
+      this.#post({ kind: 'progress', key: rec.key, downloaded: rec.downloaded, total: rec.total, ...(rate !== null ? { rate } : {}) });
+    }
   }
 
-  async #complete(key: string, bytes: number): Promise<void> {
+  async #complete(key: string, bytes: number, result?: FetchResult): Promise<void> {
+    if (result?.memory) this.#memory.set(key, result.memory);
+    else this.#memory.delete(key);
+    this.#memoryOnly.delete(key);
     const rec = await this._patch(key, (r) => {
       r.status = 'completed';
       r.bytes = bytes;
@@ -519,9 +647,18 @@ export class Offlibrary extends EventTarget {
       r.total = bytes;
       r.completedAt = now();
       r.lastAccessedAt = r.completedAt;
+      if (result) {
+        r.storage = result.storage;
+        if (result.refused) r.storageRefused = result.refused;
+        else delete r.storageRefused;
+        if (result.resumed) r.resumed = true;
+      }
       delete r.error;
     });
-    if (!rec) return;
+    if (!rec) {
+      this.#memory.delete(key);
+      return;
+    }
     this._emit('complete', { item: toPublicItem(rec) });
     this.#post({ kind: 'complete', key });
     await this.#enforceLimits(rec.collection, key);
@@ -638,15 +775,62 @@ export class Offlibrary extends EventTarget {
 
   async #remove(rec: StoredItem): Promise<void> {
     this._forget(rec.key);
+    this.#memory.delete(rec.key);
     await store.deleteItem(rec.key);
     await store.deleteParts(rec.key);
-    if (typeof caches !== 'undefined') {
+    if (rec.storage === 'opfs' || rec.files) {
+      const dir = await collectionDir(this.namespace, rec.collection, false).catch(() => undefined);
+      if (dir) {
+        for (const f of rec.files ?? rec.urls.map((_, i) => fileNameOf(rec.id, i))) {
+          await removeEntry(dir, f);
+          await removeEntry(dir, metaNameOf(f));
+        }
+      }
+    }
+    if (typeof caches !== 'undefined' && (rec.storage ?? 'cache') === 'cache') {
       const cache = await caches.open(rec.cacheName);
       const shared = new Set(
         [...this.#items.values()].filter((r) => r.cacheName === rec.cacheName).flatMap((r) => r.urls),
       );
       await Promise.all(rec.urls.filter((u) => !shared.has(u)).map((u) => cache.delete(u)));
     }
+  }
+
+  /** @internal The stored bytes of one URL of a completed item, wherever they live. */
+  async _read(key: string, url: string): Promise<Uint8Array | Blob | undefined> {
+    const rec = this.#items.get(key);
+    if (!rec) return undefined;
+    const mem = this.#memory.get(key)?.get(url);
+    if (mem) return mem;
+    const index = rec.urls.indexOf(url);
+    if (index < 0) return undefined;
+    if (rec.storage === 'opfs') {
+      const dir = await collectionDir(this.namespace, rec.collection, false).catch(() => undefined);
+      const name = rec.files?.[index] ?? fileNameOf(rec.id, index);
+      const file = dir ? await fileOf(dir, name) : undefined;
+      if (!file) return undefined;
+      const meta = dir ? await readMeta(dir, name) : undefined;
+      return meta?.type && !file.type ? new Blob([file], { type: meta.type }) : file;
+    }
+    if (rec.storage === 'memory' || typeof caches === 'undefined') return undefined;
+    const res = await (await caches.open(rec.cacheName)).match(url);
+    return res ? res.blob() : undefined;
+  }
+
+  /** @internal A Response for one URL of a completed item, wherever it lives. */
+  async _match(key: string, url: string): Promise<Response | undefined> {
+    const rec = this.#items.get(key);
+    if (!rec) return undefined;
+    if ((rec.storage ?? 'cache') === 'cache' && !this.#memory.get(key)?.has(url)) {
+      if (typeof caches === 'undefined') return undefined;
+      return (await caches.open(rec.cacheName)).match(url);
+    }
+    const data = await this._read(key, url);
+    if (!data) return undefined;
+    const blob = data instanceof Blob ? data : new Blob([data as BlobPart]);
+    const headers = new Headers({ 'Content-Length': String(blob.size) });
+    if (blob.type) headers.set('Content-Type', blob.type);
+    return new Response(blob, { status: 200, headers });
   }
 
   #require(key: string): StoredItem {
@@ -770,8 +954,29 @@ export class Offlibrary extends EventTarget {
   async #onMessage(msg: ChannelMessage): Promise<void> {
     if (!msg.key.startsWith(`${this.namespace}/`)) return;
     const kind: UpdateKind = msg.kind;
+    if (kind === 'progress') {
+      const rec = this.#items.get(msg.key);
+      const own = this.#active.get(msg.key);
+      if (!rec || rec.status !== 'downloading' || (own?.controller && !own.waiting)) return;
+      rec.downloaded = Math.max(rec.downloaded, msg.downloaded ?? 0);
+      if (msg.total) rec.total = msg.total;
+      if (msg.rate !== undefined) {
+        const r = this.#rates.get(msg.key) ?? { t: now(), bytes: rec.downloaded, rate: null, resumed: false };
+        r.rate = msg.rate;
+        this.#rates.set(msg.key, r);
+      }
+      this.#progress(rec, true);
+      return;
+    }
     if (kind === 'delete' || kind === 'abort' || kind === 'evict') {
       const prev = this.#items.get(msg.key) ?? msg.item;
+      const running = this.#active.get(msg.key);
+      if (running?.controller && !running.waiting) {
+        // Cancelled from another tab: stop our download of it too.
+        running.intent = 'cancel';
+        running.controller.abort(new DOMException('Cancelled', 'AbortError'));
+      }
+      this.#memory.delete(msg.key);
       this.#active.get(msg.key)?.detach?.();
       this.#active.delete(msg.key);
       this._forget(msg.key);
@@ -832,7 +1037,13 @@ export class Offlibrary extends EventTarget {
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', this.#onVisible);
     const prefix = `${this.namespace}/`;
     for (const rec of await store.listAll()) {
-      if (rec.key.startsWith(prefix) && this.#config.collections[rec.collection]) this._set(rec);
+      if (!rec.key.startsWith(prefix) || !this.#config.collections[rec.collection]) continue;
+      if (rec.storage === 'memory' && rec.status === 'completed' && !this.#memory.has(rec.key)) {
+        // Its bytes lived in a previous page's memory. Forget it so download() fetches it again.
+        await store.deleteItem(rec.key).catch(() => undefined);
+        continue;
+      }
+      this._set(rec);
     }
     if (this.#config.persist === 'on-init') this.#askPersist();
     await this.#reconcile();
@@ -863,6 +1074,8 @@ export class Offlibrary extends EventTarget {
         else await this._patch(rec.key, (r) => {
           r.status = 'paused';
         });
+      } else if (this.#config.resumeOnStart) {
+        fetchResumes.push(rec); // another context holds it: follow, take over if it goes away
       }
     }
     for (const rec of fetchResumes) this.#runFetch(rec);

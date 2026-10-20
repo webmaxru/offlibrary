@@ -8,8 +8,9 @@ sidebar:
 Offlibrary is an event source. Every change to an item, in any tab or in the service worker, becomes a typed event in every open tab.
 
 ```js
-const off = library.on('progress', ({ item }) => {
+const off = library.on('progress', ({ item, rate, eta }) => {
   bar.value = item.progress ?? 0; // null when the size is unknown
+  label.textContent = eta === null ? '' : `${formatBytes(rate)}/s, ${Math.ceil(eta)} s left`;
 });
 library.on('complete', ({ item }) => toast(`${item.title} is ready offline`));
 library.on('error', ({ item, error }) => {
@@ -20,7 +21,8 @@ off(); // unsubscribe
 
 | Event | Detail | When |
 |---|---|---|
-| `progress` | `{ item }` | Bytes arrived (throttled by `progressInterval`) |
+| `progress` | `{ item, loaded, total, rate, eta, resumed }` | Bytes arrived (throttled by `progressInterval`). `rate` is a smoothed bytes/second, `eta` seconds left (both `null` until measurable), `resumed` is `true` when the download continued from stored bytes |
+| `storage-refused` | `{ item, reason, error }` | Storage refused the bytes (`reason`: `'quota'`, `'short-write'` or `'unavailable'`) and `onStorageRefused: 'memory'` moved the download to memory. It continues without re-fetching |
 | `complete` | `{ item }` | Stored and available offline |
 | `error` | `{ item, error }` | Failed; `item.status === 'failed'`, `error` is an `OfflibraryError` |
 | `abort` | `{ item }` | Cancelled, by the app or from the browser's download UI. The item is gone |
@@ -79,3 +81,7 @@ offlibrarySW({
   onClick: (item) => false, // return true to skip the default focus/open behaviour
 });
 ```
+
+## Several tabs and workers
+
+Only one context downloads an item at a time (a Web Lock per item). Another tab or worker that asks for the same item doesn't fail and doesn't start a second download: it **follows** the running one, gets `progress` events (relayed over `BroadcastChannel`, about four per second), and resolves `done()` when it completes. If the context that owns the download goes away mid-way (tab closed, worker terminated), a follower takes the lock and **resumes** from the bytes already stored.
