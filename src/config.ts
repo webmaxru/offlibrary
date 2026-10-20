@@ -34,6 +34,23 @@ export interface CollectionConfig {
   retryDelay?: number;
   /** Persist partial fetch downloads so they resume after reloads. Default `true`. */
   resumable?: boolean;
+  /**
+   * Where completed files live.
+   * - `'cache'` (default): Cache Storage. The service worker serves them to `<audio>`, `<img>`, `fetch()`.
+   * - `'opfs'`: one file per URL in the Origin Private File System, written and resumed in place
+   *   (no second copy while downloading). Best for large files your code reads (AI models,
+   *   databases, archives). Uses the fetch transport only. In a dedicated worker it writes through
+   *   `createSyncAccessHandle()`; on a page through `createWritable()`.
+   */
+  storage?: 'cache' | 'opfs';
+  /**
+   * What to do when storage refuses the bytes (quota exceeded, a private window's small in-memory
+   * storage, short writes):
+   * - `'error'` (default): the item fails with `quota-exceeded`;
+   * - `'memory'`: finish the download in memory without fetching again. The item completes with
+   *   `storage: 'memory'` and `storageRefused` set; `blob()` / `bytes()` work until the page closes.
+   */
+  onStorageRefused?: 'error' | 'memory';
   /** Extra request options (credentials, headers, …) for both transports. */
   requestInit?: Pick<RequestInit, 'credentials' | 'headers' | 'referrerPolicy' | 'cache'>;
   /** Background Fetch notification UI. */
@@ -75,9 +92,9 @@ export interface OfflibraryConfig {
 
 /** A collection's policy with every default filled in (see `collection.config`). */
 export type ResolvedCollectionConfig = Required<
-  Pick<CollectionConfig, 'strategy' | 'backgroundFetchThreshold' | 'autoSize' | 'evict' | 'retries' | 'retryDelay' | 'resumable'>
+  Pick<CollectionConfig, 'strategy' | 'backgroundFetchThreshold' | 'autoSize' | 'evict' | 'retries' | 'retryDelay' | 'resumable' | 'storage' | 'onStorageRefused'>
 > &
-  Omit<CollectionConfig, 'strategy' | 'backgroundFetchThreshold' | 'autoSize' | 'evict' | 'retries' | 'retryDelay' | 'resumable'>;
+  Omit<CollectionConfig, 'strategy' | 'backgroundFetchThreshold' | 'autoSize' | 'evict' | 'retries' | 'retryDelay' | 'resumable' | 'storage' | 'onStorageRefused'>;
 
 /** @internal */
 export interface ResolvedConfig {
@@ -118,6 +135,9 @@ export function resolveConfig(config: OfflibraryConfig): ResolvedConfig {
     if (!c || typeof c !== 'object') bad(`"${at}" must be an object.`);
     if (!oneOf(c.strategy, ['auto', 'background-fetch', 'fetch'])) bad(`"${at}.strategy" must be "auto", "background-fetch" or "fetch".`);
     if (!oneOf(c.evict, ['lru', 'none'])) bad(`"${at}.evict" must be "lru" or "none".`);
+    if (!oneOf(c.storage, ['cache', 'opfs'])) bad(`"${at}.storage" must be "cache" or "opfs".`);
+    if (!oneOf(c.onStorageRefused, ['error', 'memory'])) bad(`"${at}.onStorageRefused" must be "error" or "memory".`);
+    if (c.storage === 'opfs' && c.strategy === 'background-fetch') bad(`"${at}": storage "opfs" downloads with fetch; strategy "background-fetch" cannot write to OPFS.`);
     for (const k of ['backgroundFetchThreshold', 'retryDelay', 'maxBytes'] as const) {
       if (c[k] !== undefined && !isNum(c[k])) bad(`"${at}.${k}" must be a number ≥ 0.`);
     }
@@ -134,7 +154,11 @@ export function resolveConfig(config: OfflibraryConfig): ResolvedConfig {
       retries: c.retries ?? 3,
       retryDelay: c.retryDelay ?? 1000,
       resumable: c.resumable ?? true,
+      storage: c.storage ?? 'cache',
+      onStorageRefused: c.onStorageRefused ?? 'error',
     };
+    // Background Fetch stores into the Cache API, so OPFS collections always use fetch.
+    if (collections[name]!.storage === 'opfs') collections[name]!.strategy = 'fetch';
   }
   return {
     namespace,

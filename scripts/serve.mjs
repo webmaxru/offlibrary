@@ -56,7 +56,7 @@ export function createServer({ root, port = 0, host = '127.0.0.1', log = false, 
   const base = resolve(root);
   const server = createHttpServer((req, res) => {
     const url = new URL(req.url, 'http://x');
-    const entry = { method: req.method, path: url.pathname, range: req.headers.range ?? null, ifRange: req.headers['if-range'] ?? null, time: Date.now() };
+    const entry = { method: req.method, path: url.pathname, search: url.search, range: req.headers.range ?? null, ifRange: req.headers['if-range'] ?? null, time: Date.now() };
     requests.push(entry);
     if (log) console.log(req.method, url.pathname, req.headers.range ?? '');
     const headers = {
@@ -67,9 +67,14 @@ export function createServer({ root, port = 0, host = '127.0.0.1', log = false, 
       'Cache-Control': 'no-cache',
     };
     if (req.method === 'OPTIONS') return res.writeHead(204, headers).end();
+    if (url.pathname.startsWith('/__redirect/')) {
+      // Like Hugging Face's /resolve/: a 302 to a fresh "signed" URL on every request.
+      const target = `/__media/${url.pathname.slice('/__redirect/'.length)}?sig=${Math.random().toString(36).slice(2)}&exp=${Date.now() + 3600_000}`;
+      return res.writeHead(302, { ...headers, Location: target }).end();
+    }
     if (url.pathname === '/__requests') {
       res.writeHead(200, { ...headers, 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify(requests.filter((r) => r.path.startsWith('/__media/'))));
+      return res.end(JSON.stringify(requests.filter((r) => r.path.startsWith('/__media/') || r.path.startsWith('/__redirect/'))));
     }
 
     let body;

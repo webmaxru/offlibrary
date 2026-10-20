@@ -1,7 +1,18 @@
 import type { SerializedError } from './errors.js';
+import type { Sha256State } from './internal/sha256.js';
 
 /** How a download is transported. */
 export type Strategy = 'background-fetch' | 'fetch';
+
+/**
+ * Where an item's bytes live.
+ * - `'cache'`: Cache Storage (default; the service worker can serve it to `<audio>`, `<img>`, `fetch()`).
+ * - `'opfs'`: one file per URL in the Origin Private File System (best for large files read by code:
+ *   AI models, databases, archives). Written in place, resumed in place.
+ * - `'memory'`: storage refused the bytes (quota, private browsing) and `onStorageRefused: 'memory'`
+ *   kept them in this instance's memory. Gone after a reload.
+ */
+export type StorageKind = 'cache' | 'opfs' | 'memory';
 
 /** Lifecycle of an item. */
 export type ItemStatus = 'downloading' | 'paused' | 'completed' | 'failed';
@@ -59,6 +70,12 @@ export interface OfflibraryItem<M = unknown> {
   readonly progress: number | null;
   /** Bytes stored once completed. */
   readonly bytes: number;
+  /** Where the bytes live (see {@link StorageKind}). `'memory'` means storage refused them. */
+  readonly storage: StorageKind;
+  /** Why storage was refused, when the item fell back to memory (`'quota'`, `'short-write'`, …). */
+  readonly storageRefused?: string;
+  /** `true` while/after a download continued from bytes stored earlier instead of starting at zero. */
+  readonly resumed?: boolean;
   readonly error?: SerializedError;
   readonly attempts: number;
   readonly createdAt: number;
@@ -92,6 +109,12 @@ export interface StoredItem {
   completedAt?: number;
   lastAccessedAt?: number;
   cacheName: string;
+  /** Storage backend chosen at download time. Missing in records written by 0.1.x (= `'cache'`). */
+  storage?: StorageKind;
+  /** OPFS file names (one per URL) inside the collection's directory, for `storage: 'opfs'`. */
+  files?: string[];
+  storageRefused?: string;
+  resumed?: boolean;
   ui?: StoredUI;
 }
 
@@ -104,18 +127,38 @@ export interface StoredUI {
   clickUrl?: string;
 }
 
-/** @internal Partial download state for resumable fetches. */
+/**
+ * @internal Partial download state for resumable fetches: small metadata only. The bytes are in
+ * `segments` records (Cache backend) or in the OPFS file itself (OPFS backend).
+ */
 export interface StoredPart {
   key: string;
   itemKey: string;
   index: number;
-  blobs: Blob[];
+  /** Bytes durably stored (checkpointed). */
   received: number;
   total: number;
   etag?: string;
   lastModified?: string;
   type?: string;
   done: boolean;
+  /** Number of segment records written (Cache backend). */
+  segments: number;
+  /** SHA-256 state at `received`, when the item has a `sha256-` integrity value. */
+  hash?: Sha256State;
+  /** The logical URL the part belongs to (resume is keyed on it, not on a signed redirect target). */
+  url?: string;
+}
+
+/** @internal One appended checkpoint of a Cache-backend download. */
+export interface StoredSegment {
+  key: string;
+  partKey: string;
+  itemKey: string;
+  seq: number;
+  blob: Blob;
+  /** Offset just past this segment's last byte. */
+  end: number;
 }
 
 /** @internal */
@@ -132,11 +175,12 @@ export function toPublicItem<M = unknown>(r: StoredItem): OfflibraryItem<M> {
     total: r.total,
     progress: r.status === 'completed' ? 1 : r.total > 0 ? Math.min(1, r.downloaded / r.total) : null,
     bytes: r.bytes,
+    storage: r.storage ?? 'cache',
     attempts: r.attempts,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
-  for (const k of ['title', 'meta', 'version', 'pinned', 'error', 'completedAt', 'lastAccessedAt'] as const) {
+  for (const k of ['title', 'meta', 'version', 'pinned', 'storageRefused', 'resumed', 'error', 'completedAt', 'lastAccessedAt'] as const) {
     if (r[k] !== undefined) item[k] = r[k];
   }
   return Object.freeze(item) as unknown as OfflibraryItem<M>;
