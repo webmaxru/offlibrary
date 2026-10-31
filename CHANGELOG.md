@@ -2,6 +2,10 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Until 1.0, minor versions may contain breaking changes, and they will be called out.
 
+## [0.2.1] - 2026-10-31
+
+The first 0.2.x on npm, and the first version published from GitHub Actions (npm trusted publishing, with a provenance attestation). 0.2.0 was never published to npm, so 0.2.1 contains everything listed under 0.2.0 below.
+
 ## [0.2.0] - 2026-10-20
 
 0.2.0 was never published to npm before these changes landed, so everything below ships together in the first 0.2.0 on npm.
