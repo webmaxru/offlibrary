@@ -1,6 +1,6 @@
 {
   "name": "offlibrary",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Declarative offline asset management for the web: Background Fetch when available, a resumable streaming fallback when not, plus quota, eviction, range-request serving for offline media and a Workbox plugin.",
   "keywords": [
     "background-fetch",

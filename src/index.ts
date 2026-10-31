@@ -8,6 +8,8 @@
  */
 export { createOfflibrary, Offlibrary } from './main/offlibrary.js';
 export type {
+  AdoptOptions,
+  AdoptSource,
   EvictReason,
   OfflibraryCapabilities,
   OfflibraryEventMap,

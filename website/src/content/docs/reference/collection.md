@@ -27,6 +27,7 @@ sidebar:
 | Method | Returns | Description |
 |---|---|---|
 | `download(item)` | `Promise<OfflibraryItem>` | Starts or continues a download and resolves **once it has started**. If the item is already stored with the same version, nothing is downloaded and it's marked as recently used. Paused or failed items resume. Throws `invalid-item`, `limit-exceeded` or `quota-exceeded` before starting. |
+| `adopt(item, source, { move?, signal? })` | `Promise<OfflibraryItem>` | Takes over bytes that are **already on this device** as a completed item, with no download: an OPFS `FileSystemFileHandle` your own downloader wrote, a `File`, a `Blob`. `item.integrity` is checked first (the source is untouched on a mismatch, `integrity`). In an OPFS collection a file handle is **moved** into place (a rename: no second copy, milliseconds for any size); `{ move: false }` copies and keeps the source. Holds the item's Web Lock, so it never races a download in another tab. One source per URL. See [Migrating from your own downloader](/offlibrary/guides/ai-models/#migrating-from-your-own-downloader). |
 | `downloadAll(items)` | `Promise<PromiseSettledResult[]>` | Calls `download` for each item. |
 | `done(id)` | `Promise<OfflibraryItem>` | Resolves when the item completes; rejects with an `OfflibraryError` if it fails, pauses or is removed. |
 | `get(id)` / `peek(id)` | `OfflibraryItem \| undefined` | Async / sync state of one item. |

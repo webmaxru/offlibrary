@@ -247,6 +247,8 @@ await models.done('fp16');
 const session = await ort.InferenceSession.create(await models.bytes('fp16'));
 ```
 
+Switching from your own downloader? `models.adopt(item, fileHandle)` takes over a file that is already in OPFS as a completed item: SHA-256 checked first, then moved into place (a rename, no second copy), so returning users don't download the model again. See [Migrating from your own downloader](https://salnikov.no/offlibrary/guides/ai-models/#migrating-from-your-own-downloader).
+
 256 MiB in headless Chromium: 0.67 s and 256 MB written to disk in a worker, the same as hand-written `createSyncAccessHandle()` code (0.77 s, 256 MB). More: [Storage backends](https://salnikov.no/offlibrary/concepts/storage/#storage-backends-cache-or-opfs), [workers](https://salnikov.no/offlibrary/concepts/storage/#running-in-a-dedicated-worker), [quota and private browsing](https://salnikov.no/offlibrary/concepts/storage/#when-storage-says-no-quota-and-private-browsing), [streaming integrity](https://salnikov.no/offlibrary/concepts/integrity-and-versions/#streaming-sha-256-any-size-constant-memory).
 
 ## Demo
