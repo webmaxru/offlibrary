@@ -3,7 +3,7 @@ import type { ResolvedCollectionConfig } from '../config.js';
 import { absoluteUrl } from '../internal/util.js';
 import { toPublicItem } from '../types.js';
 import type { ItemInput, OfflibraryItem } from '../types.js';
-import type { Offlibrary } from './offlibrary.js';
+import type { AdoptOptions, AdoptSource, Offlibrary } from './offlibrary.js';
 
 /** Per-collection usage. */
 export interface CollectionUsage {
@@ -55,6 +55,27 @@ export class Collection<M = unknown> {
   /** Download several items. Failing items reject individually; see the returned settled results. */
   downloadAll(items: ItemInput<M>[]): Promise<PromiseSettledResult<OfflibraryItem<M>>[]> {
     return Promise.allSettled(items.map((i) => this.download(i)));
+  }
+
+  /**
+   * Take over bytes that are already on this device as a completed item, without downloading them:
+   * a file your own downloader wrote to OPFS before you switched to Offlibrary, a `File` the user
+   * picked, a `Blob` you already hold.
+   *
+   * - Integrity (`item.integrity`) is checked **before** anything is touched; on a mismatch it throws
+   *   `integrity` and the source is left exactly where it was.
+   * - In an OPFS collection, a `FileSystemFileHandle` source is **moved** into place (a rename: no
+   *   second copy on disk, milliseconds for any size). Pass `{ move: false }` to copy instead, which
+   *   leaves the source in place. Without `FileSystemHandle.move()` it copies.
+   * - In a Cache Storage collection the bytes are stored with `cache.put()`.
+   * - Already completed with the same `version` and URLs: no-op, the source is not touched.
+   * - Holds the same Web Lock a download of this item holds, so it never races a download in
+   *   another tab or worker.
+   *
+   * One source per URL, in the same order. Resolves with the completed item.
+   */
+  adopt(item: ItemInput<M>, source: AdoptSource | AdoptSource[], options?: AdoptOptions): Promise<OfflibraryItem<M>> {
+    return this.#lib._adopt(this.name, item, Array.isArray(source) ? source : [source], options) as Promise<OfflibraryItem<M>>;
   }
 
   /** Current state of an item, or `undefined` if it is not in the library. */

@@ -4,7 +4,9 @@ import { OfflibraryError, serializeError, toOfflibraryError } from '../errors.js
 import { broadcast, isChannelMessage, openChannel } from '../internal/channel.js';
 import type { ChannelMessage, UpdateKind } from '../internal/channel.js';
 import { bgFetchIdOf, cacheNameOf, itemKey, scopeOf } from '../internal/ids.js';
-import { collectionDir, fileNameOf, fileOf, isDedicatedWorker, metaNameOf, opfsAvailable, readMeta, removeEntry } from '../internal/opfs.js';
+import { OpfsWriter, collectionDir, fileNameOf, fileOf, isDedicatedWorker, metaNameOf, opfsAvailable, readMeta, removeEntry, writeMeta } from '../internal/opfs.js';
+import type { OpfsMeta } from '../internal/opfs.js';
+import { IntegrityCheck } from '../internal/integrity-stream.js';
 import { store } from '../internal/store.js';
 import { absoluteUrl, now } from '../internal/util.js';
 import { toPublicItem } from '../types.js';
@@ -128,6 +130,52 @@ async function lockHeld(name: string): Promise<boolean> {
   if (!locks?.query) return false;
   const state = await locks.query();
   return !!state.held?.some((l) => l.name === name);
+}
+
+/** What `adopt()` takes: bytes already on this device. */
+export type AdoptSource = Blob | FileSystemFileHandle;
+
+/** Options for `Collection.adopt()`. */
+export interface AdoptOptions {
+  /**
+   * For a `FileSystemFileHandle` in OPFS: rename it into place instead of copying it (default `true`).
+   * Moving needs no extra disk space and takes milliseconds for any size; the source handle stops
+   * existing at its old path. Ignored (copy) where `FileSystemHandle.move()` is missing, for `Blob`
+   * sources and for `storage: 'cache'` collections.
+   */
+  move?: boolean;
+  /** Abort the integrity check or copy. Nothing is changed when it aborts before the move/copy. */
+  signal?: AbortSignal;
+}
+
+type MovableHandle = FileSystemFileHandle & { move(dir: FileSystemDirectoryHandle, name: string): Promise<void> };
+
+function canMove(src: AdoptSource, options: AdoptOptions): boolean {
+  return options.move !== false && !(src instanceof Blob) && typeof (src as Partial<MovableHandle>).move === 'function';
+}
+
+/** Check a blob against an SRI value before anything is touched: SHA-256 streams (constant memory), sha384/512 use WebCrypto. */
+async function verifyBlob(blob: Blob, sri: string, url: string): Promise<void> {
+  const check = new IntegrityCheck(sri);
+  await check.catchUp(blob);
+  await check.verify(url, async () => blob);
+}
+
+async function copyInto(dir: FileSystemDirectoryHandle, name: string, blob: Blob, signal?: AbortSignal): Promise<void> {
+  const handle = await dir.getFileHandle(name, { create: true });
+  const writer = await OpfsWriter.open(handle, 0, isDedicatedWorker());
+  const STEP = 4 * 1024 * 1024;
+  try {
+    for (let pos = 0; pos < blob.size; pos += STEP) {
+      signal?.throwIfAborted();
+      await writer.write(new Uint8Array(await blob.slice(pos, Math.min(blob.size, pos + STEP)).arrayBuffer()));
+    }
+    await writer.close();
+  } catch (err) {
+    await writer.abandon().catch(() => 0);
+    await removeEntry(dir, name);
+    throw err;
+  }
 }
 
 /**
@@ -678,6 +726,118 @@ export class Offlibrary extends EventTarget {
   #errorOf(rec: StoredItem): OfflibraryError {
     const e = rec.error;
     return new OfflibraryError(e?.code ?? 'unknown', e?.message ?? 'Download failed.', e?.status !== undefined ? { status: e.status } : {});
+  }
+
+  /** @internal Take over bytes that are already on this device as a completed item (see `Collection.adopt`). */
+  async _adopt(collection: string, input: ItemInput, sources: AdoptSource[], options: AdoptOptions = {}): Promise<OfflibraryItem> {
+    await this.ready;
+    const urls = validateItem(input, absoluteUrl);
+    if (sources.length !== urls.length) {
+      throw new OfflibraryError('invalid-item', 'adopt(): one source per URL.');
+    }
+    const key = this._key(collection, input.id);
+    const cfg = this._collectionConfig(collection);
+    const lockName = `offlibrary:${key}`;
+    const run = async (): Promise<OfflibraryItem> => {
+      const existing = this.#items.get(key) ?? (await store.getItem(key));
+      const sameContent = existing && existing.version === input.version && existing.urls.join('\n') === urls.join('\n');
+      if (existing && sameContent && existing.status === 'completed') {
+        if (!this.#items.has(key)) this._set(existing);
+        return this._touch(key);
+      }
+      const integrity = input.integrity === undefined ? undefined : typeof input.integrity === 'string' ? [input.integrity] : input.integrity.slice();
+      const blobs: Blob[] = [];
+      for (let i = 0; i < sources.length; i++) {
+        const src = sources[i]!;
+        const blob = src instanceof Blob ? src : await src.getFile();
+        if (sources.length === 1 && input.size !== undefined && blob.size !== input.size) {
+          throw new OfflibraryError('integrity', `adopt(): ${blob.size} ≠ ${input.size} bytes.`);
+        }
+        const sri = integrity?.[i];
+        if (sri) await verifyBlob(blob, sri, urls[i]!);
+        options.signal?.throwIfAborted();
+        blobs.push(blob);
+      }
+      options.signal?.throwIfAborted();
+      // Verified: from here on the source is consumed. Forget any partial download of the same item first.
+      // (A partial download of it, or a different version/URL set: replaced, as download() would.)
+      if (existing?.status === 'downloading' && this.#active.has(key)) await this._cancel(key, true);
+      else if (existing) await this.#remove(existing);
+      const total = blobs.reduce((s, b) => s + b.size, 0);
+      const storage = cfg.storage === 'opfs' ? 'opfs' : 'cache';
+      const files = storage === 'opfs' ? urls.map((_, i) => fileNameOf(input.id, i)) : undefined;
+      if (storage === 'opfs') {
+        if (!opfsAvailable()) throw new OfflibraryError('not-supported', 'This browser has no Origin Private File System (storage: "opfs").');
+        const dir = (await collectionDir(this.namespace, collection, true))!;
+        const copying = sources.some((s) => !canMove(s, options));
+        if (copying) await this.#makeRoom(collection, cfg, total, key);
+        for (let i = 0; i < sources.length; i++) {
+          const src = sources[i]!;
+          const name = files![i]!;
+          await removeEntry(dir, name);
+          await removeEntry(dir, metaNameOf(name));
+          if (canMove(src, options)) {
+            await (src as MovableHandle).move(dir, name);
+          } else {
+            await copyInto(dir, name, blobs[i]!, options.signal);
+          }
+          const file = await fileOf(dir, name);
+          if (!file || file.size !== blobs[i]!.size) {
+            throw new OfflibraryError('unknown', `adopt(): ${name} holds ${file?.size ?? 0} of ${blobs[i]!.size} bytes.`);
+          }
+          const meta: OpfsMeta = { url: urls[i]!, size: file.size, complete: true, updatedAt: now() };
+          if (blobs[i]!.type) meta.type = blobs[i]!.type;
+          if (integrity?.[i]) meta.integrity = integrity[i]!;
+          await writeMeta(dir, name, meta);
+        }
+      } else {
+        if (typeof caches === 'undefined') throw new OfflibraryError('not-supported', 'Cache Storage is not available in this context.');
+        await this.#makeRoom(collection, cfg, total, key);
+        const cache = await caches.open(cacheNameOf(this.namespace, collection));
+        for (let i = 0; i < urls.length; i++) {
+          const b = blobs[i]!;
+          const headers: Record<string, string> = { 'Content-Length': String(b.size) };
+          if (b.type) headers['Content-Type'] = b.type;
+          await cache.put(urls[i]!, new Response(b, { status: 200, headers }));
+        }
+      }
+      const t = now();
+      const rec: StoredItem = {
+        key,
+        scope: scopeOf(this.namespace, collection),
+        namespace: this.namespace,
+        collection,
+        id: input.id,
+        urls,
+        status: 'completed',
+        strategy: 'fetch',
+        downloaded: total,
+        total,
+        bytes: total,
+        attempts: 0,
+        createdAt: existing?.createdAt ?? t,
+        updatedAt: t,
+        completedAt: t,
+        lastAccessedAt: t,
+        cacheName: cacheNameOf(this.namespace, collection),
+        storage,
+        ...(files ? { files } : {}),
+      };
+      if (input.title !== undefined) rec.title = input.title;
+      if (input.meta !== undefined) rec.meta = input.meta;
+      if (input.version !== undefined) rec.version = input.version;
+      if (integrity) rec.integrity = integrity;
+      if (input.pinned) rec.pinned = true;
+      await store.deleteParts(key);
+      await this._write(rec);
+      if (this.#config.persist === 'on-download') this.#askPersist();
+      this._emit('complete', { item: toPublicItem(rec) });
+      this.#post({ kind: 'complete', key });
+      await this.#enforceLimits(collection, key);
+      return toPublicItem(this.#items.get(key) ?? rec);
+    };
+    // Same lock a download of this item holds: adopting never races a download in another tab.
+    return waitForLock(lockName, options.signal as AbortSignal, run);
   }
 
   /** @internal */

@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Until 1.0, minor versions may contain breaking changes, and they will be called out.
 
+## [0.2.2] - Unreleased
+
+### Added
+
+- **`collection.adopt(item, source, { move?, signal? })`**: take over bytes that are already on this device as a completed item, without downloading them: an OPFS `FileSystemFileHandle` written by your own downloader, a `File`, a `Blob`. For apps switching to Offlibrary whose users already have a large file stored (Stemina: 353/701 MB models in its own OPFS folder).
+  - `item.integrity` is verified **before** anything is touched (streaming SHA-256, constant memory); on a mismatch it throws `integrity` and the source stays where it was. `item.size` is checked too.
+  - In an OPFS collection a file handle is **moved** into place with `FileSystemHandle.move()` (a rename: no second copy on disk; 15 ms for a 353 MB file in headless Chromium, 3.3 s for the whole call including the SHA-256 check). `{ move: false }`, `Blob` sources and browsers without `move()` copy instead and leave the source in place. Cache Storage collections store it with `cache.put()`.
+  - Already completed with the same `version` and URLs: a no-op. A partial download or a different version of the item is replaced, as `download()` would.
+  - Holds the same Web Lock a download of the item holds, so it never races a download in another tab or worker; fires `complete` and notifies other tabs.
+  - New exported types `AdoptSource` and `AdoptOptions`.
+- Docs: "Migrating from your own downloader" in the AI-models guide; `adopt()` in the Collection reference.
+
 ## [0.2.1] - 2026-10-31
 
 The first 0.2.x on npm, and the first version published from GitHub Actions (npm trusted publishing, with a provenance attestation). 0.2.0 was never published to npm, so 0.2.1 contains everything listed under 0.2.0 below.

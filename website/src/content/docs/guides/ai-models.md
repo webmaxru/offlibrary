@@ -59,6 +59,32 @@ Against the real thing: Stemina's fp16 model from Hugging Face (353 MB), downloa
 
 And the private-window case: a 700 MB download in an off-the-record Chromium context got a short write at 515 MiB (while `estimate()` claimed 10.7 GB of quota), moved to memory without re-fetching and completed in 11 s with `storage: 'memory'`, `storageRefused: 'short-write'` (`OFFLIBRARY_E2E_QUOTA=1 npm run test:e2e`).
 
+## Migrating from your own downloader
+
+An app that already shipped its own downloader has users with the model on disk. Switching to Offlibrary must not cost them another 353 or 701 MB. `collection.adopt()` takes the existing file over as a completed item:
+
+```js
+// engine.worker.js, once, before the first models.download()
+const old = await navigator.storage.getDirectory()
+  .then((root) => root.getDirectoryHandle('stemina'))
+  .then((dir) => dir.getDirectoryHandle('models'))
+  .then((dir) => dir.getFileHandle('bs_roformer_sw_6stem_fp16.onnx'))
+  .catch(() => undefined);
+
+if (old && !(await models.has('fp16'))) {
+  await models.adopt(
+    { id: 'fp16', url: FP16_URL, size: 352_778_874, integrity: FP16_SRI, pinned: true },
+    old, // a FileSystemFileHandle: moved, not copied
+  );
+}
+await models.download({ id: 'fp16', url: FP16_URL, size: 352_778_874, integrity: FP16_SRI, pinned: true }); // no-op now
+```
+
+- The SHA-256 check runs **before** anything moves. A file that fails it (an old downloader that only compared lengths could have kept a corrupt one) stays where it was, `adopt()` throws `integrity`, and you decide: delete it and download, or leave it for the old code path.
+- The move is a rename inside OPFS: no second copy on disk and, measured in headless Chromium on a 352,778,874-byte file, **15 ms** for the move against **3.3 s** for the whole `adopt()` with the streaming SHA-256 check.
+- `{ move: false }` copies instead and leaves the source in place, which is what you want while a rollback to the old code must still find its file (it needs the disk space twice).
+- `adopt()` holds the same Web Lock as a download of the item, so a second tab that starts downloading the same model waits and then finds it completed.
+
 ## Transformers.js
 
 Transformers.js caches model files itself (in the Cache API). To use Offlibrary's downloads instead (OPFS, resume, integrity, progress), download the files first and hand them over through Transformers.js' custom cache hook, which asks for `match(request)` and `put(request, response)`:
