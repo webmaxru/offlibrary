@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Until 1.0, minor versions may contain breaking changes, and they will be called out.
 
-## [0.2.2] - Unreleased
+## [0.2.2] - 2026-11-01
 
 ### Added
 
@@ -100,5 +100,7 @@ The first release: a full rewrite of the 2022 prototype.
 
 - The 2022 Create React App example and the Express test server, including its committed `node_modules`. They are still in git history (`3e14a45`).
 
+[0.2.2]: https://github.com/webmaxru/offlibrary/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/webmaxru/offlibrary/compare/v0.1.0...v0.2.1
 [0.2.0]: https://github.com/webmaxru/offlibrary/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/webmaxru/offlibrary/releases/tag/v0.1.0
